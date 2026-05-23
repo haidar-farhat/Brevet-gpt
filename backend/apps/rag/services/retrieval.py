@@ -27,8 +27,9 @@ class RetrievedChunk:
     page_end: int
     heading_path: str
     content: str
+    token_count: int
     dense_sim: float
-    score: float
+    score: float  # RRF score, then overwritten by the reranker blend if enabled
 
 
 def _uid(value) -> uuid.UUID:
@@ -82,8 +83,11 @@ class HybridRetriever:
             rows = cursor.fetchall()
         return [(_uid(vid), float(score)) for vid, score in rows if vid is not None]
 
-    def retrieve(self, queries: list[str], language: str | None, subject: str | None, *,
-                 candidates: int, top_k: int, token_budget: int) -> tuple[list[RetrievedChunk], float]:
+    def retrieve_candidates(self, queries: list[str], language: str | None, subject: str | None, *,
+                            candidates: int) -> tuple[list[RetrievedChunk], float]:
+        """Dense + lexical retrieval fused by RRF, hydrated into RetrievedChunks
+        in fused order (NOT yet truncated to a token budget). Returns (candidates,
+        best_dense_sim)."""
         where = self._where(language, subject)
         dense_sim: dict[uuid.UUID, float] = {}
         rank_lists: list[list[uuid.UUID]] = []
@@ -105,16 +109,12 @@ class HybridRetriever:
             for c in Chunk.objects.filter(vector_id__in=[uid for uid, _ in fused]).select_related("book", "subject")
         }
 
-        selected: list[RetrievedChunk] = []
-        used_tokens = 0
+        result: list[RetrievedChunk] = []
         for uid, _ in fused:
             chunk = chunks.get(uid)
             if chunk is None:
                 continue
-            tokens = chunk.token_count or 0
-            if selected and used_tokens + tokens > token_budget:
-                continue
-            selected.append(
+            result.append(
                 RetrievedChunk(
                     chunk_id=chunk.id,
                     vector_id=str(chunk.vector_id),
@@ -125,15 +125,34 @@ class HybridRetriever:
                     page_end=chunk.page_end,
                     heading_path=chunk.heading_path,
                     content=chunk.content,
+                    token_count=chunk.token_count or 0,
                     dense_sim=dense_sim.get(uid, 0.0),
                     score=rrf_score[uid],
                 )
             )
-            used_tokens += tokens
+        return result, (max(dense_sim.values()) if dense_sim else 0.0)
+
+    @staticmethod
+    def select_within_budget(chunks: list[RetrievedChunk], *, top_k: int,
+                             token_budget: int) -> list[RetrievedChunk]:
+        """Greedily take chunks (already ordered) up to top_k, respecting the
+        token budget. The first chunk is always kept."""
+        selected: list[RetrievedChunk] = []
+        used_tokens = 0
+        for chunk in chunks:
+            if selected and used_tokens + chunk.token_count > token_budget:
+                continue
+            selected.append(chunk)
+            used_tokens += chunk.token_count
             if len(selected) >= top_k:
                 break
+        return selected
 
-        return selected, (max(dense_sim.values()) if dense_sim else 0.0)
+    def retrieve(self, queries: list[str], language: str | None, subject: str | None, *,
+                 candidates: int, top_k: int, token_budget: int) -> tuple[list[RetrievedChunk], float]:
+        """Legacy one-shot retrieve (used by the non-agentic pipeline)."""
+        result, best_sim = self.retrieve_candidates(queries, language, subject, candidates=candidates)
+        return self.select_within_budget(result, top_k=top_k, token_budget=token_budget), best_sim
 
 
 def _rrf(rank_lists: list[list[uuid.UUID]], k: int = RRF_K) -> list[tuple[uuid.UUID, float]]:

@@ -155,3 +155,37 @@ RAG_MAX_REFORMULATIONS = env.int("RAG_MAX_REFORMULATIONS", default=2)
 # Chunking: token budget per chunk and overlap between adjacent chunks.
 EMBED_CHUNK_TOKENS = env.int("EMBED_CHUNK_TOKENS", default=512)
 EMBED_CHUNK_OVERLAP = env.int("EMBED_CHUNK_OVERLAP", default=64)
+
+# --- Agentic RAG ---------------------------------------------------------
+# Master switch. False => the original linear pipeline (byte-identical behaviour).
+RAG_AGENTIC = env.bool("RAG_AGENTIC", default=True)
+
+# Reranking (highest accuracy ROI, 0 LLM cost): cross-encoder reorders the
+# fused candidates before the token-budget selection.
+RAG_RERANK = env.bool("RAG_RERANK", default=True)
+RAG_RERANK_BACKEND = env("RAG_RERANK_BACKEND", default="cross_encoder")  # cross_encoder|llm|none
+RAG_RERANK_MODEL = env("RAG_RERANK_MODEL", default="BAAI/bge-reranker-v2-m3")
+RAG_RERANK_CANDIDATES = env.int("RAG_RERANK_CANDIDATES", default=12)
+RAG_DENSE_SIM_WEIGHT = env.float("RAG_DENSE_SIM_WEIGHT", default=0.3)  # blend w/ cross score
+
+# Context analysing (LLM grades relevance + sufficiency of retrieved chunks).
+RAG_GRADE_CONTEXT = env.bool("RAG_GRADE_CONTEXT", default=True)
+RAG_GRADE_MAX_CHUNKS = env.int("RAG_GRADE_MAX_CHUNKS", default=4)
+RAG_SUFFICIENCY_MIN = env.float("RAG_SUFFICIENCY_MIN", default=0.5)
+
+# Agentic refine loop (failure-aware query refinement when context is weak).
+RAG_AGENT_MAX_LOOPS = env.int("RAG_AGENT_MAX_LOOPS", default=1)
+
+# Reason-then-answer for problem-solving subjects.
+RAG_REASON = env.bool("RAG_REASON", default=True)
+RAG_REASON_SUBJECTS = env.list("RAG_REASON_SUBJECTS", default=["math", "physics", "chemistry"])
+RAG_REASON_MAX_TOKENS = env.int("RAG_REASON_MAX_TOKENS", default=512)
+
+# Self-verification of the answer's claims against the retrieved context.
+RAG_VERIFY = env.bool("RAG_VERIFY", default=True)
+RAG_VERIFY_MIN = env.float("RAG_VERIFY_MIN", default=0.5)
+RAG_VERIFY_MAX_CLAIMS = env.int("RAG_VERIFY_MAX_CLAIMS", default=6)
+RAG_VERIFY_ACTION = env("RAG_VERIFY_ACTION", default="warn")  # warn|revise|refuse
+
+# Hard ceiling on LLM calls per answer (protects a slow CPU model from blowups).
+RAG_AGENT_LLM_BUDGET = env.int("RAG_AGENT_LLM_BUDGET", default=8)

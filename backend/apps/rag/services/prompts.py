@@ -63,6 +63,46 @@ Give up to 4 broader or rephrased queries (synonyms, related terms, simpler word
 in the same language as the question.\
 """
 
+# Failure-aware refinement: the agent passes what was already tried and what the
+# grader judged to be MISSING, so the new queries target the gap.
+REFINE_SYSTEM = """\
+You refine search queries for a Brevet textbook retrieval system. The previous \
+retrieval was insufficient. You are given the QUESTION, the queries ALREADY_TRIED, \
+and what is MISSING. Respond with JSON ONLY: {"search_queries": ["...", "..."]}
+Give up to 4 NEW queries (in the question's language) that specifically target the \
+MISSING information; use synonyms, the precise technical terms, and related concepts. \
+Do not repeat the queries already tried.\
+"""
+
+# Combined context analysis in ONE call (cheap on a slow local model): grade each
+# numbered passage for relevance AND judge overall sufficiency.
+GRADE_SYSTEM = """\
+You assess retrieved CONTEXT passages for answering a QUESTION. The passages are \
+numbered [1], [2], ... Respond with JSON ONLY:
+{"relevant": [numbers of the passages that are relevant/useful], \
+"sufficient": true or false, "missing": "short phrase of what is absent, or empty"}
+Judge ONLY from the passages; do not use outside knowledge.\
+"""
+
+# Reason-then-answer: a private working step for problem-solving subjects.
+REASON_SYSTEM = """\
+You are working through a Brevet (grade 9) problem using ONLY the CONTEXT.
+- Identify the exact rule, formula or method in the context and cite it as [n].
+- Apply it step by step to reach the result. Show the steps.
+- If the required rule is NOT in the context, state that clearly.
+This is private working-out, not the final student-facing answer. Be rigorous, not polished. \
+Write in the same language as the question.\
+"""
+
+# Corrective rewrite when self-verification finds unsupported claims.
+REVISE_SYSTEM = """\
+You revise a draft answer so that EVERY statement is supported by the CONTEXT.
+You are given the CONTEXT, the DRAFT answer, and the UNSUPPORTED claims it made.
+Remove or correct the unsupported claims using only the context; keep what is supported. \
+If after this there is not enough to answer, say you don't have enough information in the \
+materials. Cite sources as [n]. Write in the same language as the question.\
+"""
+
 REFUSAL = {
     "en": "I don't have enough information in the materials to answer that.",
     "fr": "Je n'ai pas assez d'informations dans les documents pour répondre à cela.",
@@ -85,10 +125,39 @@ _LANGUAGE_DIRECTIVE = {
 }
 
 
-def build_answer_messages(question: str, chunks, language: str = "en") -> list[dict]:
+def _lang(language: str) -> str:
+    return _LANGUAGE_DIRECTIVE.get(language, _LANGUAGE_DIRECTIVE["en"])
+
+
+def build_answer_messages(question: str, chunks, language: str = "en",
+                          reasoning: str | None = None) -> list[dict]:
     user = ANSWER_USER.format(context=format_context(chunks), question=question)
-    user += "\n\n" + _LANGUAGE_DIRECTIVE.get(language, _LANGUAGE_DIRECTIVE["en"])
+    if reasoning:
+        user += ("\n\nWORKED REASONING (a draft — verify it against the context, "
+                 "correct any error, then give the final answer):\n" + reasoning)
+    user += "\n\n" + _lang(language)
     return [
         {"role": "system", "content": ANSWER_SYSTEM},
+        {"role": "user", "content": user},
+    ]
+
+
+def build_reason_messages(question: str, chunks, language: str = "en") -> list[dict]:
+    user = ANSWER_USER.format(context=format_context(chunks), question=question)
+    user += "\n\n" + _lang(language)
+    return [
+        {"role": "system", "content": REASON_SYSTEM},
+        {"role": "user", "content": user},
+    ]
+
+
+def build_revise_messages(question: str, chunks, draft: str, unsupported: list[str],
+                          language: str = "en") -> list[dict]:
+    missing = "\n".join(f"- {c}" for c in unsupported) or "(none listed)"
+    user = (ANSWER_USER.format(context=format_context(chunks), question=question)
+            + f"\n\nDRAFT ANSWER:\n{draft}\n\nUNSUPPORTED CLAIMS:\n{missing}"
+            + "\n\n" + _lang(language))
+    return [
+        {"role": "system", "content": REVISE_SYSTEM},
         {"role": "user", "content": user},
     ]

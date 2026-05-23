@@ -65,3 +65,27 @@ async def broaden(llm: LMStudioClient, question: str) -> tuple[list[str], LLMRes
     )
     queries = [q.strip() for q in (data.get("search_queries") or []) if isinstance(q, str) and q.strip()]
     return queries[:4], result
+
+
+async def refine_queries(llm: LMStudioClient, question: str, *, missing: str,
+                         prior_queries: list[str], language: str) -> tuple[list[str], LLMResult]:
+    """Failure-aware refinement: target the grader's MISSING gap, avoid repeats."""
+    user = (
+        f"QUESTION: {question}\n"
+        f"ALREADY_TRIED: {prior_queries}\n"
+        f"MISSING: {missing or 'relevant supporting passages'}"
+    )
+    data, result = await llm.chat_json(
+        [
+            {"role": "system", "content": prompts.REFINE_SYSTEM},
+            {"role": "user", "content": user},
+        ],
+        temperature=0.3,
+        max_tokens=200,
+    )
+    tried = {q.lower() for q in prior_queries}
+    queries = [
+        q.strip() for q in (data.get("search_queries") or [])
+        if isinstance(q, str) and q.strip() and q.strip().lower() not in tried
+    ]
+    return queries[:4], result

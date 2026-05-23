@@ -39,6 +39,21 @@ def get_retriever() -> HybridRetriever:
     return _retriever
 
 
+_UNSET = object()
+_reranker = _UNSET
+
+
+def get_reranker():
+    """Cached reranker (loaded once, like the embedder). May be None when
+    reranking is disabled or the backend isn't a cross-encoder."""
+    global _reranker
+    if _reranker is _UNSET:
+        from apps.rag.services.rerank import build_reranker
+
+        _reranker = build_reranker()
+    return _reranker
+
+
 @dataclass
 class Answer:
     question: str
@@ -93,6 +108,16 @@ async def answer_question(question: str, *, language: str | None = None,
 
     llm = LMStudioClient()
 
+    # Agentic path (Corrective/Self-RAG): rerank + grade + refine + reason + verify.
+    if settings.RAG_AGENTIC:
+        from apps.rag.services import agent
+
+        return await agent.agentic_answer(
+            question, language=language, subject=subject, top_k=top_k,
+            on_event=on_event, llm=llm, started=started, llm_results=llm_results,
+        )
+
+    # --- Legacy linear pipeline (RAG_AGENTIC=False) ----------------------
     # 1. Plan / route -----------------------------------------------------
     t0 = perf_counter()
     plan, plan_result = await reformulation.plan_query(llm, question, language, subject)

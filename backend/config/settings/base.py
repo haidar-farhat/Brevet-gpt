@@ -35,6 +35,7 @@ DJANGO_APPS = [
 ]
 LOCAL_APPS = [
     "apps.catalog",
+    "apps.rag",
 ]
 INSTALLED_APPS = DJANGO_APPS + LOCAL_APPS
 
@@ -125,6 +126,21 @@ LOCAL_EMBED_MODEL = env("LOCAL_EMBED_MODEL", default="BAAI/bge-m3")
 # Only used when EMBEDDING_BACKEND=openai.
 OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
 OPENAI_EMBED_MODEL = env("OPENAI_EMBED_MODEL", default="text-embedding-3-large")
+
+# --- Generation (LM Studio, OpenAI-compatible local server) --------------
+LMSTUDIO_BASE_URL = env("LMSTUDIO_BASE_URL", default="http://localhost:1234/v1")
+LMSTUDIO_API_KEY = env("LMSTUDIO_API_KEY", default="lm-studio")
+LMSTUDIO_MODEL = env("LMSTUDIO_MODEL", default="")  # blank => auto-detect loaded model
+LLM_TEMPERATURE = env.float("LLM_TEMPERATURE", default=0.2)
+LLM_MAX_TOKENS = env.int("LLM_MAX_TOKENS", default=1024)
+LLM_TIMEOUT = env.int("LLM_TIMEOUT", default=120)
+
+# --- Retrieval -----------------------------------------------------------
+RAG_CANDIDATES = env.int("RAG_CANDIDATES", default=20)            # per retriever
+RAG_TOP_K = env.int("RAG_TOP_K", default=6)                       # chunks in final context
+RAG_MAX_CONTEXT_TOKENS = env.int("RAG_MAX_CONTEXT_TOKENS", default=3000)
+RAG_MIN_RELEVANCE = env.float("RAG_MIN_RELEVANCE", default=0.25)  # below => refuse (off-topic)
+RAG_MAX_REFORMULATIONS = env.int("RAG_MAX_REFORMULATIONS", default=2)
 
 # Chunking: token budget per chunk and overlap between adjacent chunks.
 EMBED_CHUNK_TOKENS = env.int("EMBED_CHUNK_TOKENS", default=512)

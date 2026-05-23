@@ -18,7 +18,7 @@ from django.utils import timezone
 
 from apps.catalog.metadata import clean_title, infer_subject_code
 from apps.catalog.models import Book, Subject
-from apps.catalog.services.embeddings import OpenAIEmbedder
+from apps.catalog.services.embeddings import build_embedder
 from apps.catalog.services.ingest import ingest_book
 from apps.catalog.services.vectorstore import get_collection
 
@@ -49,16 +49,17 @@ class Command(BaseCommand):
         limit = options["limit"]
 
         embedder = collection = None
-        if not dry_run:
-            if not settings.OPENAI_API_KEY:
-                raise CommandError(
-                    "OPENAI_API_KEY is not set. Add it to backend/.env, or use --dry-run."
-                )
-            embedder = OpenAIEmbedder(settings.OPENAI_API_KEY, settings.OPENAI_EMBED_MODEL)
-            collection = get_collection(settings.CHROMA_DIR, settings.CHROMA_COLLECTION)
-
         if dry_run:
             self.stdout.write(self.style.WARNING("DRY RUN — no embeddings, no DB writes."))
+        else:
+            try:
+                embedder = build_embedder()
+            except ValueError as exc:
+                raise CommandError(str(exc)) from exc
+            collection = get_collection(settings.CHROMA_DIR, settings.CHROMA_COLLECTION)
+            self.stdout.write(self.style.HTTP_INFO(
+                f"Embedder: {settings.EMBEDDING_BACKEND} ({embedder.model})"
+            ))
 
         total_books = total_chunks = total_tokens = 0
         for subdir, (language, folder) in _RESULTS_MAP.items():

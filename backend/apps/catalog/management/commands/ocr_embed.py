@@ -22,7 +22,7 @@ from django.utils import timezone
 from apps.catalog.enums import Language, SubjectCode
 from apps.catalog.metadata import clean_title
 from apps.catalog.models import Book, Subject
-from apps.catalog.services.embeddings import OpenAIEmbedder
+from apps.catalog.services.embeddings import build_embedder
 from apps.catalog.services.ingest import ingest_book
 from apps.catalog.services.vectorstore import get_collection
 
@@ -63,11 +63,19 @@ class Command(BaseCommand):
         level = options["level"] or self._ask("Level", "brevet", interactive)
         dry_run = options["dry_run"]
 
-        # Fail fast on a missing key *before* the expensive OCR step.
-        if not dry_run and not settings.OPENAI_API_KEY:
-            raise CommandError("OPENAI_API_KEY is not set. Add it to backend/.env, or use --dry-run.")
-
         subject = Subject.objects.get(code=subject_code)
+
+        # Build the embedder up front so a misconfig fails *before* costly OCR.
+        embedder = collection = None
+        if dry_run:
+            self.stdout.write(self.style.WARNING("DRY RUN — Book saved; skipping embeddings/Chroma."))
+        else:
+            try:
+                embedder = build_embedder()
+            except ValueError as exc:
+                raise CommandError(str(exc)) from exc
+            collection = get_collection(settings.CHROMA_DIR, settings.CHROMA_COLLECTION)
+
         self.stdout.write(self.style.MIGRATE_HEADING(
             f"\nOCR + embed: {title}\n"
             f"  language={language}  subject={subject_code}  level={level}\n"
@@ -93,14 +101,7 @@ class Command(BaseCommand):
             },
         )
 
-        # --- 4. Embed -------------------------------------------------------
-        embedder = collection = None
-        if not dry_run:
-            embedder = OpenAIEmbedder(settings.OPENAI_API_KEY, settings.OPENAI_EMBED_MODEL)
-            collection = get_collection(settings.CHROMA_DIR, settings.CHROMA_COLLECTION)
-        else:
-            self.stdout.write(self.style.WARNING("DRY RUN — Book saved; skipping embeddings/Chroma."))
-
+        # --- 4. Embed (embedder/collection were prepared up front) ----------
         result = ingest_book(
             book=book, pdf_path=clean_pdf, embedder=embedder, collection=collection, dry_run=dry_run,
         )

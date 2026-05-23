@@ -1,10 +1,15 @@
 # Ingestion / embedding pipeline (kept separate from the web requirements).
 # Install into the same venv:  pip install -r requirements-ingest.txt
 
-# Vector store + embeddings
+# Vector store
 chromadb~=1.0
-openai~=1.0
 tiktoken~=0.8
+
+# Local CPU embeddings (default backend). Pulls a CPU-only torch.
+sentence-transformers>=3.0,<6
+
+# Optional: only needed when EMBEDDING_BACKEND=openai.
+openai~=1.0
 
 # OCR runtime — needed only by the `ocr_embed` command, which reuses
 # gpu_ocr_books.py. (PyMuPDF is already pinned in requirements.txt.)

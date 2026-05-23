@@ -117,7 +117,12 @@ RESULTS_DIR = Path(env("RESULTS_DIR", default=str(PROJECT_ROOT / "results")))
 CHROMA_DIR = Path(env("CHROMA_DIR", default=str(PROJECT_ROOT / "chroma")))
 CHROMA_COLLECTION = env("CHROMA_COLLECTION", default="brevet")
 
-# --- Embeddings (OpenAI) -------------------------------------------------
+# --- Embeddings ----------------------------------------------------------
+# "local" = sentence-transformers on CPU (offline, default); "openai" = API.
+EMBEDDING_BACKEND = env("EMBEDDING_BACKEND", default="local")
+LOCAL_EMBED_MODEL = env("LOCAL_EMBED_MODEL", default="BAAI/bge-m3")
+
+# Only used when EMBEDDING_BACKEND=openai.
 OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
 OPENAI_EMBED_MODEL = env("OPENAI_EMBED_MODEL", default="text-embedding-3-large")
 

@@ -71,16 +71,25 @@ def _aggregate_metrics(llm_results: list[LLMResult], generation: LLMResult | Non
 
 
 async def answer_question(question: str, *, language: str | None = None,
-                          subject: str | None = None, top_k: int | None = None) -> Answer:
+                          subject: str | None = None, top_k: int | None = None,
+                          on_event=None) -> Answer:
+    """Answer a question. If ``on_event`` (async callable) is given, emit live
+    log events per stage and stream the answer tokens, for the web terminal."""
     started = perf_counter()
     llm_results: list[LLMResult] = []
+
+    async def emit(event: dict) -> None:
+        if on_event is not None:
+            await on_event(event)
 
     guard = check_question(question)
     if not guard.ok:
         lang = language or reformulation._guess_language(question)
+        await emit({"type": "log", "stage": "guard", "level": "warn", "message": f"blocked: {guard.reason}"})
         return _refusal(question, lang, subject, _guard_message(lang), started,
                         llm_results, reason=guard.reason)
     question = guard.text
+    await emit({"type": "log", "stage": "guard", "message": "input accepted"})
 
     llm = LMStudioClient()
 
@@ -89,6 +98,8 @@ async def answer_question(question: str, *, language: str | None = None,
     plan, plan_result = await reformulation.plan_query(llm, question, language, subject)
     reformulate_s = perf_counter() - t0
     llm_results.append(plan_result)
+    await emit({"type": "log", "stage": "route", "language": plan.language, "subject": plan.subject,
+                "queries": plan.queries, "latency_s": round(reformulate_s, 3)})
 
     # 2. Retrieve (with bounded recursive broadening) ---------------------
     retriever = get_retriever()
@@ -102,6 +113,8 @@ async def answer_question(question: str, *, language: str | None = None,
     )
     reformulations = 0
     while best_sim < min_rel and reformulations < settings.RAG_MAX_REFORMULATIONS:
+        await emit({"type": "log", "stage": "retrieve", "level": "warn",
+                    "message": f"weak match (sim={best_sim:.2f}); broadening query"})
         extra_queries, broaden_result = await reformulation.broaden(llm, question)
         llm_results.append(broaden_result)
         reformulations += 1
@@ -115,9 +128,16 @@ async def answer_question(question: str, *, language: str | None = None,
         if retry_sim > best_sim:
             selected, best_sim = retry_sel, retry_sim
     retrieve_s = perf_counter() - t0
+    await emit({"type": "log", "stage": "retrieve", "chunks": len(selected),
+                "best_sim": round(best_sim, 3), "reformulations": reformulations,
+                "latency_s": round(retrieve_s, 3),
+                "sources": [{"n": i, "book": c.book_title, "page": c.page_start,
+                             "sim": round(c.dense_sim, 3)} for i, c in enumerate(selected, 1)]})
 
     # 3. Grounding guard --------------------------------------------------
     if not selected or best_sim < min_rel:
+        await emit({"type": "log", "stage": "answer", "level": "warn",
+                    "message": "insufficient context — refusing"})
         return _refusal(question, plan.language, plan.subject,
                         prompts.REFUSAL[plan.language], started, llm_results,
                         reason="no relevant context", best_sim=best_sim,
@@ -125,8 +145,13 @@ async def answer_question(question: str, *, language: str | None = None,
                         latency={"reformulate_s": reformulate_s, "retrieve_s": retrieve_s})
 
     # 4. Generate ---------------------------------------------------------
+    await emit({"type": "log", "stage": "generate", "message": f"generating with {await llm.model()}"})
     t0 = perf_counter()
-    generation = await llm.chat(prompts.build_answer_messages(question, selected, plan.language))
+    messages = prompts.build_answer_messages(question, selected, plan.language)
+    if on_event is not None:
+        generation = await llm.chat_stream(messages, lambda delta: emit({"type": "token", "text": delta}))
+    else:
+        generation = await llm.chat(messages)
     generate_s = perf_counter() - t0
     llm_results.append(generation)
     answer_text = sanitize_answer(generation.text)

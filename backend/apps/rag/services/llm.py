@@ -92,6 +92,43 @@ class LMStudioClient:
             latency=latency,
         )
 
+    async def chat_stream(self, messages: list[dict], on_token, *, temperature: float | None = None,
+                          max_tokens: int | None = None) -> LLMResult:
+        """Stream completion tokens, invoking ``await on_token(delta)`` for each.
+        Usage isn't reliably reported in stream mode across local backends, so
+        token counts are estimated with tiktoken."""
+        from apps.catalog.services.chunking import count_tokens
+
+        client = self._client_or_init()
+        model = await self.model()
+        started = time.perf_counter()
+        parts: list[str] = []
+        try:
+            stream = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=settings.LLM_TEMPERATURE if temperature is None else temperature,
+                max_tokens=settings.LLM_MAX_TOKENS if max_tokens is None else max_tokens,
+                stream=True,
+            )
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta.content or ""
+                if delta:
+                    parts.append(delta)
+                    await on_token(delta)
+        except Exception as exc:
+            raise LLMUnavailable(f"LM Studio stream failed: {exc}") from exc
+        text = "".join(parts)
+        prompt_text = " ".join(m.get("content", "") for m in messages)
+        return LLMResult(
+            text=text,
+            prompt_tokens=count_tokens(prompt_text),
+            completion_tokens=count_tokens(text),
+            latency=time.perf_counter() - started,
+        )
+
     async def chat_json(self, messages: list[dict], **kwargs) -> tuple[dict, LLMResult]:
         """Chat expecting a JSON object back; tolerant of code-fenced output."""
         result = await self.chat(messages, json_mode=True, **kwargs)

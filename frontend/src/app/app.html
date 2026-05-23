@@ -1,0 +1,71 @@
+<div class="app">
+  <header>
+    <div class="brand">brevet-gpt <span class="sub">// web terminal</span></div>
+    <div class="state" [class.busy]="busy()">{{ busy() ? '● working' : '○ idle' }}</div>
+  </header>
+
+  <section class="controls">
+    <textarea
+      [ngModel]="question()"
+      (ngModelChange)="question.set($event)"
+      (keydown.enter)="onEnter($event)"
+      [disabled]="busy()"
+      rows="2"
+      placeholder="Ask about the materials — e.g. 'What is a mole?' / 'Qu'est-ce qu'un neurone ?'  (Enter to send)"
+    ></textarea>
+    <div class="row">
+      <label>lang
+        <select [ngModel]="language()" (ngModelChange)="language.set($event)" [disabled]="busy()">
+          <option value="auto">auto</option>
+          <option value="en">en</option>
+          <option value="fr">fr</option>
+        </select>
+      </label>
+      <label>subject
+        <input [ngModel]="subject()" (ngModelChange)="subject.set($event)" [disabled]="busy()"
+               placeholder="(optional) physics, chemistry…" />
+      </label>
+      <button (click)="ask()" [disabled]="busy()">ask ▷</button>
+    </div>
+  </section>
+
+  <section class="terminal">
+    @for (l of logs(); track $index) {
+      <div class="line {{ l.level }}">
+        <span class="tag">{{ l.stage }}</span><span class="msg">{{ l.text }}</span>
+      </div>
+    }
+    @if (answer()) {
+      <div class="line answer">
+        <span class="tag">answer</span><span class="msg">{{ answer() }}<span class="caret" [class.hidden]="!busy()">▋</span></span>
+      </div>
+    }
+    @if (!logs().length && !busy()) {
+      <div class="hint">Ask a question to watch the pipeline run: route → retrieve → generate.</div>
+    }
+  </section>
+
+  @if (citations().length) {
+    <section class="panel">
+      <h3>sources</h3>
+      @for (c of citations(); track c.n) {
+        <div class="cite">
+          <span class="n">[{{ c.n }}]</span> {{ c.subject }} — {{ c.book }} p.{{ c.page_start }}@if (c.heading) {<span class="head"> — {{ c.heading }}</span>}
+        </div>
+      }
+    </section>
+  }
+
+  @if (metrics()) {
+    <footer class="metrics">
+      <span>model {{ metrics().model }}</span>
+      <span>{{ metrics().total_tokens }} tok</span>
+      <span>{{ metrics().generation_tokens_per_sec }} tok/s</span>
+      <span>retrieve {{ metrics().latency.retrieve_s }}s</span>
+      <span>gen {{ metrics().latency.generate_s }}s</span>
+      <span>total {{ metrics().latency.total_s }}s</span>
+      <span>ctx {{ metrics().context_chunks }}</span>
+      <span>sim {{ metrics().best_similarity }}</span>
+    </footer>
+  }
+</div>

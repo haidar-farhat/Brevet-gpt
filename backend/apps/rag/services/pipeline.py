@@ -126,7 +126,7 @@ async def answer_question(question: str, *, language: str | None = None,
 
     # 4. Generate ---------------------------------------------------------
     t0 = perf_counter()
-    generation = await llm.chat(prompts.build_answer_messages(question, selected))
+    generation = await llm.chat(prompts.build_answer_messages(question, selected, plan.language))
     generate_s = perf_counter() - t0
     llm_results.append(generation)
     answer_text = sanitize_answer(generation.text)

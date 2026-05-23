@@ -79,8 +79,16 @@ def format_context(chunks) -> str:
     return "\n\n".join(blocks)
 
 
-def build_answer_messages(question: str, chunks) -> list[dict]:
+_LANGUAGE_DIRECTIVE = {
+    "en": "Write your entire answer in English.",
+    "fr": "Rédige toute ta réponse en français.",
+}
+
+
+def build_answer_messages(question: str, chunks, language: str = "en") -> list[dict]:
+    user = ANSWER_USER.format(context=format_context(chunks), question=question)
+    user += "\n\n" + _LANGUAGE_DIRECTIVE.get(language, _LANGUAGE_DIRECTIVE["en"])
     return [
         {"role": "system", "content": ANSWER_SYSTEM},
-        {"role": "user", "content": ANSWER_USER.format(context=format_context(chunks), question=question)},
+        {"role": "user", "content": user},
     ]

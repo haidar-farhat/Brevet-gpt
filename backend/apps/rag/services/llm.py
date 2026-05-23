@@ -66,6 +66,10 @@ class LMStudioClient:
 
     async def chat(self, messages: list[dict], *, temperature: float | None = None,
                    max_tokens: int | None = None, json_mode: bool = False) -> LLMResult:
+        # NB: json_mode is intentionally NOT mapped to response_format. LM Studio
+        # rejects OpenAI's {"type": "json_object"} (it wants json_schema/text), so
+        # we rely on the "respond JSON only" instruction + the tolerant parser in
+        # chat_json. This keeps the client portable across local backends.
         client = self._client_or_init()
         model = await self.model()
         kwargs: dict = {
@@ -74,8 +78,6 @@ class LMStudioClient:
             "temperature": settings.LLM_TEMPERATURE if temperature is None else temperature,
             "max_tokens": settings.LLM_MAX_TOKENS if max_tokens is None else max_tokens,
         }
-        if json_mode:
-            kwargs["response_format"] = {"type": "json_object"}
         started = time.perf_counter()
         try:
             response = await client.chat.completions.create(**kwargs)

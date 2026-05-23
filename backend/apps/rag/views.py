@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
 
 from apps.rag.services.llm import LLMUnavailable
 from apps.rag.services.pipeline import answer_question, health
@@ -12,7 +11,6 @@ from apps.rag.services.pipeline import answer_question, health
 _JSON = {"ensure_ascii": False}
 
 
-@csrf_exempt
 async def ask_view(request):
     if request.method != "POST":
         return JsonResponse({"error": "POST required"}, status=405)
@@ -36,6 +34,13 @@ async def ask_view(request):
         return JsonResponse({"error": str(exc)}, status=503)
 
     return JsonResponse(answer.to_dict(), json_dumps_params=_JSON)
+
+
+# Set the attribute directly instead of using @csrf_exempt: the decorator wraps
+# the function so Django no longer sees it as a coroutine and calls it
+# synchronously (returning an unawaited coroutine). Setting the flag keeps the
+# async view intact while CsrfViewMiddleware still skips it.
+ask_view.csrf_exempt = True
 
 
 async def health_view(request):

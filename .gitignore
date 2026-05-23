@@ -17,3 +17,6 @@ backend/staticfiles/
 *.log
 *.sqlite3
 
+# Vector store (persistent ChromaDB)
+/chroma/
+

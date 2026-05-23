@@ -109,3 +109,18 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # --- Domain-specific -----------------------------------------------------
 # Root of the scanned-textbook corpus (contains english/ and french/).
 ASSETS_DIR = Path(env("ASSETS_DIR", default=str(PROJECT_ROOT / "assets")))
+
+# Clean, OCR'd structured PDFs (the embedding input; eng/ and fr/ subfolders).
+RESULTS_DIR = Path(env("RESULTS_DIR", default=str(PROJECT_ROOT / "results")))
+
+# --- Vector store --------------------------------------------------------
+CHROMA_DIR = Path(env("CHROMA_DIR", default=str(PROJECT_ROOT / "chroma")))
+CHROMA_COLLECTION = env("CHROMA_COLLECTION", default="brevet")
+
+# --- Embeddings (OpenAI) -------------------------------------------------
+OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
+OPENAI_EMBED_MODEL = env("OPENAI_EMBED_MODEL", default="text-embedding-3-large")
+
+# Chunking: token budget per chunk and overlap between adjacent chunks.
+EMBED_CHUNK_TOKENS = env.int("EMBED_CHUNK_TOKENS", default=512)
+EMBED_CHUNK_OVERLAP = env.int("EMBED_CHUNK_OVERLAP", default=64)

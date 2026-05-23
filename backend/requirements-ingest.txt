@@ -1,0 +1,15 @@
+# Ingestion / embedding pipeline (kept separate from the web requirements).
+# Install into the same venv:  pip install -r requirements-ingest.txt
+
+# Vector store + embeddings
+chromadb~=1.0
+openai~=1.0
+tiktoken~=0.8
+
+# OCR runtime — needed only by the `ocr_embed` command, which reuses
+# gpu_ocr_books.py. (PyMuPDF is already pinned in requirements.txt.)
+numpy~=2.0
+opencv-python-headless~=4.10
+pytesseract~=0.3
+reportlab~=4.2
+tqdm~=4.66

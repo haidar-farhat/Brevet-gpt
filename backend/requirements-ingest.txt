@@ -8,8 +8,12 @@ tiktoken~=0.8
 # Local CPU embeddings (default backend). Pulls a CPU-only torch.
 sentence-transformers>=3.0,<6
 
-# Optional: only needed when EMBEDDING_BACKEND=openai.
-openai~=1.0
+# OpenAI client — used for LM Studio generation (OpenAI-compatible API) and,
+# optionally, OpenAI embeddings when EMBEDDING_BACKEND=openai.
+openai>=1.40,<3
+
+# ASGI server for the `brevet` run command (async API).
+uvicorn>=0.30
 
 # OCR runtime — needed only by the `ocr_embed` command, which reuses
 # gpu_ocr_books.py. (PyMuPDF is already pinned in requirements.txt.)

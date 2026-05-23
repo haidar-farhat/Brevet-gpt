@@ -159,7 +159,7 @@ def _citation(n: int, c) -> dict:
 
 
 def _context(n: int, c) -> dict:
-    return {**_citation(n, c), "snippet": c.content[:300],
+    return {**_citation(n, c), "content": c.content, "snippet": c.content[:240],
             "dense_sim": round(c.dense_sim, 3), "score": round(c.score, 4)}
 
 

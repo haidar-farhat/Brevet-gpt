@@ -209,25 +209,15 @@ async def agentic_answer(question: str, *, language, subject, top_k, on_event,
             parts = [question]
         capped = len(parts) > settings.RAG_MAX_SUBPROBLEMS
         parts = parts[: settings.RAG_MAX_SUBPROBLEMS]
-        budget["max"] = max(budget["max"], len(parts) + 8)  # decompose + rules + per-part + assemble
+        budget["max"] = max(budget["max"], len(parts) + 6)  # decompose + per-part + assemble + slack
         multi = len(parts) > 1
-
-        # Fetch the RULES / how-to, NOT other similar example exercises: name the
-        # lessons this problem needs and retrieve the theory for them. Falls back
-        # to the broad context if rule lookup yields nothing.
-        rule_chunks = selected
-        if can_call():
-            rules, rules_result = await reformulation.identify_rules(llm, question, language=analysis.language)
-            llm_results.append(rules_result)
-            if rules:
-                await emit({"type": "log", "stage": "solve",
-                            "message": f"looking up the rules: {', '.join(rules)}"})
-                rc, _rc_sim, _ = await do_retrieve(rules, analysis.subject)
-                if rc:
-                    rule_chunks = rc
-        # Every part shares these rules; trim once to a small, focused window.
+        # The retrieved chapter chunks already CONTAIN the rules/methods (the
+        # textbook interleaves lessons + exercises on the same pages). Trim to a
+        # small focused window — SOLVE_SYSTEM tells the model to extract and apply
+        # the RULE rather than copy a similar example, and the small prompt is what
+        # stops a small model from choking on a long monolith.
         ctx = retriever.select_within_budget(
-            rule_chunks, top_k=settings.RAG_SOLVE_TOP_K, token_budget=settings.RAG_SOLVE_CONTEXT_TOKENS)
+            selected, top_k=settings.RAG_SOLVE_TOP_K, token_budget=settings.RAG_SOLVE_CONTEXT_TOKENS)
         await emit({"type": "log", "stage": "solve",
                     "message": f"solving {len(parts)} part(s) step by step"})
 

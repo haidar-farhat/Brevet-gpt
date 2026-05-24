@@ -225,21 +225,3 @@ async def decompose_problem(llm: LMStudioClient, question: str, *,
     raw = data.get("parts") or data.get("sub_problems") or []
     parts = [t for t in (_as_text(x) for x in raw) if t] if isinstance(raw, list) else []
     return parts, result
-
-
-async def identify_rules(llm: LMStudioClient, question: str, *,
-                         language: str) -> tuple[list[str], LLMResult]:
-    """Name the rules/lessons a problem needs, so the solve path retrieves the
-    THEORY (how-to) instead of other similar worked exercises. Small JSON =>
-    reliable; returns [] if it can't, then the caller keeps the broad context."""
-    data, result = await llm.chat_json(
-        [
-            {"role": "system", "content": prompts.RULES_SYSTEM},
-            {"role": "user", "content": question},
-        ],
-        temperature=0.0,
-        max_tokens=400,
-    )
-    raw = data.get("rules") or data.get("topics") or []
-    rules = [t for t in (_as_text(x) for x in raw) if t] if isinstance(raw, list) else []
-    return rules[:6], result

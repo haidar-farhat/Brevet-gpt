@@ -142,7 +142,7 @@ LMSTUDIO_BASE_URL = env("LMSTUDIO_BASE_URL", default="http://localhost:1234/v1")
 LMSTUDIO_API_KEY = env("LMSTUDIO_API_KEY", default="lm-studio")
 LMSTUDIO_MODEL = env("LMSTUDIO_MODEL", default="")  # blank => auto-detect loaded model
 LLM_TEMPERATURE = env.float("LLM_TEMPERATURE", default=0.2)
-LLM_MAX_TOKENS = env.int("LLM_MAX_TOKENS", default=1024)
+LLM_MAX_TOKENS = env.int("LLM_MAX_TOKENS", default=1536)  # room for fuller, tutor-style answers
 LLM_TIMEOUT = env.int("LLM_TIMEOUT", default=120)
 
 # --- Retrieval -----------------------------------------------------------
@@ -162,8 +162,11 @@ RAG_AGENTIC = env.bool("RAG_AGENTIC", default=True)
 
 # Reranking (highest accuracy ROI, 0 LLM cost): cross-encoder reorders the
 # fused candidates before the token-budget selection.
+# "dense" = no extra model, reorders using the dense similarity (robust default).
+# "cross_encoder" = best quality but loads a 2nd torch model — on Windows this can
+# exceed the page-file/commit limit alongside bge-m3; raise the page file to use it.
 RAG_RERANK = env.bool("RAG_RERANK", default=True)
-RAG_RERANK_BACKEND = env("RAG_RERANK_BACKEND", default="cross_encoder")  # cross_encoder|llm|none
+RAG_RERANK_BACKEND = env("RAG_RERANK_BACKEND", default="dense")  # dense|cross_encoder|none
 RAG_RERANK_MODEL = env("RAG_RERANK_MODEL", default="BAAI/bge-reranker-v2-m3")
 RAG_RERANK_CANDIDATES = env.int("RAG_RERANK_CANDIDATES", default=12)
 RAG_DENSE_SIM_WEIGHT = env.float("RAG_DENSE_SIM_WEIGHT", default=0.3)  # blend w/ cross score
@@ -189,3 +192,37 @@ RAG_VERIFY_ACTION = env("RAG_VERIFY_ACTION", default="warn")  # warn|revise|refu
 
 # Hard ceiling on LLM calls per answer (protects a slow CPU model from blowups).
 RAG_AGENT_LLM_BUDGET = env.int("RAG_AGENT_LLM_BUDGET", default=8)
+
+# Smart routing: refuse off-topic questions early (saves retrieval+generation),
+# and ask a clarifying question when the request is too vague to answer.
+RAG_SCOPE_GUARD = env.bool("RAG_SCOPE_GUARD", default=True)
+RAG_CLARIFY = env.bool("RAG_CLARIFY", default=True)
+
+# Routing breadth: when False (default), retrieval is NOT hard-filtered by the
+# routed subject — a mis-route can't exclude the right chunks; reranking + LLM
+# grading decide relevance across all subjects. Set True for stricter, faster
+# single-subject search when routing is trusted.
+RAG_SUBJECT_FILTER = env.bool("RAG_SUBJECT_FILTER", default=False)
+
+# --- Decompose & solve (multi-part problems) -----------------------------
+# When a routed math/physics/chemistry question is an exercise to SOLVE (apply
+# textbook rules to a NEW problem), break it into self-contained sub-problems
+# and solve each with a small, focused context. The small per-part prompt is the
+# real fix for "no output" on a small local model (a long monolith prompt makes a
+# 4B model stream zero tokens). Set RAG_SOLVE=False for the single-pass tutor prompt.
+RAG_SOLVE = env.bool("RAG_SOLVE", default=True)
+RAG_MAX_SUBPROBLEMS = env.int("RAG_MAX_SUBPROBLEMS", default=12)   # safety cap (covers a 9-part sheet)
+RAG_SOLVE_TOP_K = env.int("RAG_SOLVE_TOP_K", default=3)            # chunks fed to each part
+RAG_SOLVE_CONTEXT_TOKENS = env.int("RAG_SOLVE_CONTEXT_TOKENS", default=1400)
+RAG_SOLVE_MAX_TOKENS = env.int("RAG_SOLVE_MAX_TOKENS", default=700)
+# Retry a generation once with a leaner prompt when it streams zero tokens.
+RAG_SOLVE_RETRY_EMPTY = env.bool("RAG_SOLVE_RETRY_EMPTY", default=True)
+
+# Never silently drop a long worksheet; only truncate beyond this hard cap.
+RAG_MAX_QUESTION_CHARS = env.int("RAG_MAX_QUESTION_CHARS", default=6000)
+
+# --- Semantic cache ------------------------------------------------------
+# Serve near-duplicate questions from a cached answer (skips the whole pipeline).
+RAG_CACHE = env.bool("RAG_CACHE", default=True)
+RAG_CACHE_MIN_SIM = env.float("RAG_CACHE_MIN_SIM", default=0.97)  # high => only near-identical
+RAG_CACHE_COLLECTION = env("RAG_CACHE_COLLECTION", default="query_cache")

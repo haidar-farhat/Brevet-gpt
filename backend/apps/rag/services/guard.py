@@ -8,6 +8,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+# Non-Django fallback; the live limit is settings.RAG_MAX_QUESTION_CHARS so long
+# multi-part worksheets aren't silently cut (see _max_question_chars).
 MAX_QUESTION_CHARS = 2000
 
 # Common jailbreak / prompt-injection phrasings (EN + FR).
@@ -36,17 +38,31 @@ class GuardResult:
     ok: bool
     text: str
     reason: str = ""
+    truncated: bool = False
+
+
+def _max_question_chars() -> int:
+    """Live char limit from settings, with a safe fallback when Django isn't set up."""
+    try:
+        from django.conf import settings
+
+        return int(getattr(settings, "RAG_MAX_QUESTION_CHARS", MAX_QUESTION_CHARS))
+    except Exception:
+        return MAX_QUESTION_CHARS
 
 
 def check_question(raw: str) -> GuardResult:
     text = _CONTROL.sub(" ", raw or "").strip()
     if not text:
         return GuardResult(False, "", "empty question")
-    if len(text) > MAX_QUESTION_CHARS:
-        text = text[:MAX_QUESTION_CHARS]
+    truncated = False
+    limit = _max_question_chars()
+    if len(text) > limit:
+        text = text[:limit]
+        truncated = True
     if _INJECTION.search(text):
         return GuardResult(False, text, "possible prompt injection")
-    return GuardResult(True, text)
+    return GuardResult(True, text, truncated=truncated)
 
 
 def sanitize_answer(text: str) -> str:

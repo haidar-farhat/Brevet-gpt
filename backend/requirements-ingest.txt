@@ -7,6 +7,9 @@ tiktoken~=0.8
 
 # Local CPU embeddings (default backend). Pulls a CPU-only torch.
 sentence-transformers>=3.0,<6
+# Pin transformers to the stable 4.x line: 5.x (e.g. 5.9.0) segfaults on Windows
+# when a second model is loaded alongside bge-m3 (native access violation).
+transformers>=4.41,<5
 
 # OpenAI client — used for LM Studio generation (OpenAI-compatible API) and,
 # optionally, OpenAI embeddings when EMBEDDING_BACKEND=openai.

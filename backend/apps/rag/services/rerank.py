@@ -63,3 +63,18 @@ def rerank_chunks(reranker: CrossEncoderReranker, query: str, chunks: list[Retri
         norm = (s - lo) / span if span else 1.0
         chunk.score = (1.0 - dense_weight) * norm + dense_weight * chunk.dense_sim
     return sorted(chunks, key=lambda c: c.score, reverse=True)
+
+
+def dense_rerank(chunks: list[RetrievedChunk], *, dense_weight: float) -> list[RetrievedChunk]:
+    """No-model reranker: blend the (previously unused) dense similarity with the
+    normalized RRF score and reorder. Zero cost, no second torch model — the
+    robust default when a cross-encoder can't be co-loaded with the embedder."""
+    if not chunks:
+        return chunks
+    rrf = [c.score for c in chunks]
+    lo, hi = min(rrf), max(rrf)
+    span = hi - lo
+    for chunk in chunks:
+        norm = (chunk.score - lo) / span if span else 1.0
+        chunk.score = (1.0 - dense_weight) * norm + dense_weight * chunk.dense_sim
+    return sorted(chunks, key=lambda c: c.score, reverse=True)

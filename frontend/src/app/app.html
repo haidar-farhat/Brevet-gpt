@@ -1,71 +1,155 @@
 <div class="app">
   <header>
-    <div class="brand">brevet-gpt <span class="sub">// web terminal</span></div>
-    <div class="state" [class.busy]="busy()">{{ busy() ? '● working' : '○ idle' }}</div>
+    <div class="brand">Brevet-GPT <span class="sub">study assistant</span></div>
+    @if (busy()) {
+      <div class="status busy"><span class="dot"></span>{{ stageLabel() }}…</div>
+    } @else {
+      <div class="status">ready</div>
+    }
   </header>
 
-  <section class="controls">
+  <!-- Ask -->
+  <section class="ask">
     <textarea
       [ngModel]="question()"
       (ngModelChange)="question.set($event)"
       (keydown.enter)="onEnter($event)"
       [disabled]="busy()"
       rows="2"
-      placeholder="Ask about the materials — e.g. 'What is a mole?' / 'Qu'est-ce qu'un neurone ?'  (Enter to send)"
+      placeholder="Ask anything from the textbooks… (Enter to send)"
     ></textarea>
-    <div class="row">
-      <label>lang
-        <select [ngModel]="language()" (ngModelChange)="language.set($event)" [disabled]="busy()">
-          <option value="auto">auto</option>
-          <option value="en">en</option>
-          <option value="fr">fr</option>
-        </select>
-      </label>
-      <label>subject
-        <input [ngModel]="subject()" (ngModelChange)="subject.set($event)" [disabled]="busy()"
-               placeholder="(optional) physics, chemistry…" />
-      </label>
-      <button (click)="ask()" [disabled]="busy()">ask ▷</button>
+
+    <div class="controls">
+      <div class="seg-ctrl" role="group" aria-label="language">
+        <button [class.on]="language()==='auto'" (click)="language.set('auto')" [disabled]="busy()">Auto</button>
+        <button [class.on]="language()==='en'" (click)="language.set('en')" [disabled]="busy()">EN</button>
+        <button [class.on]="language()==='fr'" (click)="language.set('fr')" [disabled]="busy()">FR</button>
+      </div>
+      <select class="subject" [ngModel]="subject()" (ngModelChange)="subject.set($event)" [disabled]="busy()">
+        <option value="">Any subject</option>
+        @for (s of subjects; track s) { <option [value]="s">{{ s }}</option> }
+      </select>
+      <button class="ask-btn" (click)="ask()" [disabled]="busy()">{{ busy() ? 'Working…' : 'Ask ▷' }}</button>
     </div>
-  </section>
 
-  <section class="terminal">
-    @for (l of logs(); track $index) {
-      <div class="line {{ l.level }}">
-        <span class="tag">{{ l.stage }}</span><span class="msg">{{ l.text }}</span>
+    @if (!hasRun()) {
+      <div class="examples">
+        <span class="ex-label">Try</span>
+        @for (ex of examples; track ex.q) {
+          <button class="chip" (click)="setExample(ex)">{{ ex.q }}</button>
+        }
       </div>
-    }
-    @if (answer()) {
-      <div class="line answer">
-        <span class="tag">answer</span><span class="msg">{{ answer() }}<span class="caret" [class.hidden]="!busy()">▋</span></span>
-      </div>
-    }
-    @if (!logs().length && !busy()) {
-      <div class="hint">Ask a question to watch the pipeline run: route → retrieve → generate.</div>
     }
   </section>
 
-  @if (citations().length) {
-    <section class="panel">
-      <h3>sources</h3>
-      @for (c of citations(); track c.n) {
-        <div class="cite">
-          <span class="n">[{{ c.n }}]</span> {{ c.subject }} — {{ c.book }} p.{{ c.page_start }}@if (c.heading) {<span class="head"> — {{ c.heading }}</span>}
+  @if (hasRun()) {
+    <!-- THINKING segment: streamed reasoning + live pipeline steps -->
+    <section class="seg think">
+      <div class="seg-head">
+        <span class="seg-title">Thinking</span>
+        @if (busy()) { <span class="live"><span class="dot"></span>{{ stageLabel() }}…</span> }
+        <span class="spacer"></span>
+        <button class="mini" (click)="thinkingOpen.set(!thinkingOpen())">{{ thinkingOpen() ? 'hide' : 'show' }}</button>
+      </div>
+      @if (thinkingOpen()) {
+        @if (thinking()) {
+          <div class="reasoning"><pre>{{ thinking() }}<span class="caret" [class.hidden]="!busy()">▋</span></pre></div>
+        }
+        <div class="steps">
+          @for (l of logs(); track $index) {
+            <div class="step {{ l.level }}"><span class="tag">{{ l.stage }}</span><span class="msg">{{ l.text }}</span></div>
+          }
+          @if (!logs().length) { <div class="muted">starting…</div> }
         </div>
       }
     </section>
-  }
 
-  @if (metrics()) {
-    <footer class="metrics">
-      <span>model {{ metrics().model }}</span>
-      <span>{{ metrics().total_tokens }} tok</span>
-      <span>{{ metrics().generation_tokens_per_sec }} tok/s</span>
-      <span>retrieve {{ metrics().latency.retrieve_s }}s</span>
-      <span>gen {{ metrics().latency.generate_s }}s</span>
-      <span>total {{ metrics().latency.total_s }}s</span>
-      <span>ctx {{ metrics().context_chunks }}</span>
-      <span>sim {{ metrics().best_similarity }}</span>
-    </footer>
+    <!-- ANSWER segment -->
+    <section class="seg answer-seg {{ answerClass() }}">
+      <div class="seg-head">
+        <span class="seg-title">{{ answerTitle() }}</span>
+        <span class="spacer"></span>
+        @if (cached()) { <span class="pill cached">⚡ cached</span> }
+        @if (routed().language) { <span class="pill">{{ routed().language }}</span> }
+        @if (routed().subject) { <span class="pill">{{ routed().subject }}</span> }
+        @if (answer() && !busy()) { <button class="copy" (click)="copy()">{{ copied() ? 'Copied ✓' : 'Copy' }}</button> }
+      </div>
+      <div class="answer-body">
+        @if (answer()) {
+          @if (busy()) {
+            <pre>{{ answer() }}<span class="caret">▋</span></pre>
+          } @else {
+            <div class="rich" [innerHTML]="renderedAnswer()"></div>
+          }
+        } @else if (busy()) {
+          <div class="muted">waiting for the answer…</div>
+        }
+      </div>
+    </section>
+
+    <!-- Stats -->
+    @if (metrics(); as m) {
+      <section class="seg stats">
+        <div class="seg-head"><span class="seg-title">Stats</span></div>
+        <div class="grid">
+          @for (s of perf(); track s.label) {
+            <div class="stat">
+              <div class="v">{{ s.value }}</div>
+              <div class="l">{{ s.label }}</div>
+              @if (s.hint) { <div class="h">{{ s.hint }}</div> }
+            </div>
+          }
+        </div>
+        @if (latencyBars().length) {
+          <div class="timing">
+            <div class="bar">
+              @for (b of latencyBars(); track b.label) {
+                <div class="seg-bar {{ b.cls }}" [style.width.%]="b.pct" [title]="b.label + ' · ' + b.s + 's'"></div>
+              }
+            </div>
+            <div class="legend">
+              @for (b of latencyBars(); track b.label) { <span class="key {{ b.cls }}">{{ b.label }} {{ b.s }}s</span> }
+            </div>
+          </div>
+        }
+        @if (quality(); as q) {
+          <div class="badges">
+            <span class="badge {{ tone(q.faithfulness) }}">faithfulness {{ pct(q.faithfulness) }}</span>
+            <span class="badge {{ q.sufficient ? 'good' : 'ok' }}">context {{ q.sufficient ? 'sufficient' : 'partial' }}</span>
+            @if (q.relevant != null) { <span class="badge muted">relevant {{ pct(q.relevant) }}</span> }
+            <span class="badge muted">reranker: {{ q.reranker }}</span>
+            @if (q.loops) { <span class="badge ok">refined ×{{ q.loops }}</span> }
+            @if (q.revised) { <span class="badge ok">self-revised</span> }
+          </div>
+        }
+      </section>
+    }
+
+    <!-- Sources: click a source to expand its full chunk -->
+    @if (contexts().length) {
+      <section class="seg sources">
+        <div class="seg-head">
+          <span class="seg-title">Sources</span>
+          <span class="spacer"></span>
+          <button class="mini" (click)="toggleAllSources()">
+            {{ expanded().size >= contexts().length ? 'collapse all' : 'expand all' }}
+          </button>
+        </div>
+        @for (c of contexts(); track c.n) {
+          <div class="src" [class.open]="isExpanded(c.n)">
+            <button class="src-head" (click)="toggleSource(c.n)">
+              <span class="chev">{{ isExpanded(c.n) ? '▾' : '▸' }}</span>
+              <span class="n">{{ c.n }}</span>
+              <span class="meta">{{ c.subject }} · {{ c.book }} · p.{{ c.page_start }}@if (c.page_end !== c.page_start) {-{{ c.page_end }}}@if (c.heading) { — {{ c.heading }} }</span>
+              <span class="spacer"></span>
+              <span class="sim">sim {{ c.dense_sim }}</span>
+            </button>
+            @if (isExpanded(c.n)) {
+              <div class="src-body"><pre>{{ c.content }}</pre></div>
+            }
+          </div>
+        }
+      </section>
+    }
   }
 </div>

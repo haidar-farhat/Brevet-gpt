@@ -65,6 +65,7 @@ class Answer:
     citations: list[dict]
     contexts: list[dict]
     metrics: dict
+    status: str = "answer"  # answer | clarify | out_of_scope | refused | blocked
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -85,6 +86,14 @@ def _aggregate_metrics(llm_results: list[LLMResult], generation: LLMResult | Non
     }
 
 
+def nonempty_answer(text: str, language: str) -> str:
+    """Guarantee a non-blank answer: when generation produced nothing, return a
+    friendly localized fallback so the SSE result.answer is never empty."""
+    if text and text.strip():
+        return text
+    return prompts.EMPTY_FALLBACK.get(language, prompts.EMPTY_FALLBACK["en"])
+
+
 async def answer_question(question: str, *, language: str | None = None,
                           subject: str | None = None, top_k: int | None = None,
                           on_event=None) -> Answer:
@@ -101,23 +110,57 @@ async def answer_question(question: str, *, language: str | None = None,
     if not guard.ok:
         lang = language or reformulation._guess_language(question)
         await emit({"type": "log", "stage": "guard", "level": "warn", "message": f"blocked: {guard.reason}"})
-        return _refusal(question, lang, subject, _guard_message(lang), started,
-                        llm_results, reason=guard.reason)
+        return _terminal(question, lang, subject, _guard_message(lang), started, llm_results,
+                         status="blocked", refused=True, reason=guard.reason)
     question = guard.text
     await emit({"type": "log", "stage": "guard", "message": "input accepted"})
+    if guard.truncated:
+        await emit({"type": "log", "stage": "guard", "level": "warn",
+                    "message": f"question was very long — using the first {len(question)} characters"})
+
+    # --- Semantic cache lookup ------------------------------------------
+    query_vec = None
+    if settings.RAG_CACHE:
+        from apps.rag.services.cache import get_cache
+        try:
+            query_vec = (await asyncio.to_thread(get_retriever().embedder.embed, [question]))[0]
+            hit = await asyncio.to_thread(get_cache().get, query_vec, language, subject)
+        except Exception:
+            hit = None
+        if hit is not None:
+            await emit({"type": "log", "stage": "cache", "message": "semantic cache hit — returning stored answer"})
+            return hit
 
     llm = LMStudioClient()
-
-    # Agentic path (Corrective/Self-RAG): rerank + grade + refine + reason + verify.
     if settings.RAG_AGENTIC:
         from apps.rag.services import agent
-
-        return await agent.agentic_answer(
+        answer = await agent.agentic_answer(
+            question, language=language, subject=subject, top_k=top_k,
+            on_event=on_event, llm=llm, started=started, llm_results=llm_results,
+        )
+    else:
+        answer = await _simple_answer(
             question, language=language, subject=subject, top_k=top_k,
             on_event=on_event, llm=llm, started=started, llm_results=llm_results,
         )
 
-    # --- Legacy linear pipeline (RAG_AGENTIC=False) ----------------------
+    # --- Store successful answers in the cache --------------------------
+    if settings.RAG_CACHE and query_vec is not None and answer.status == "answer" and not answer.refused:
+        try:
+            await asyncio.to_thread(get_cache().put, question, query_vec, answer, language, subject)
+        except Exception:
+            pass
+    return answer
+
+
+async def _simple_answer(question: str, *, language, subject, top_k, on_event,
+                         llm: LMStudioClient, started: float, llm_results: list[LLMResult]) -> Answer:
+    """The original linear pipeline (used when RAG_AGENTIC=False)."""
+
+    async def emit(event: dict) -> None:
+        if on_event is not None:
+            await on_event(event)
+
     # 1. Plan / route -----------------------------------------------------
     t0 = perf_counter()
     plan, plan_result = await reformulation.plan_query(llm, question, language, subject)
@@ -179,7 +222,7 @@ async def answer_question(question: str, *, language: str | None = None,
         generation = await llm.chat(messages)
     generate_s = perf_counter() - t0
     llm_results.append(generation)
-    answer_text = sanitize_answer(generation.text)
+    answer_text = nonempty_answer(sanitize_answer(generation.text), plan.language)
 
     metrics = _aggregate_metrics(
         llm_results, generation,
@@ -222,16 +265,26 @@ def _guard_message(lang: str) -> str:
     }[lang]
 
 
+def _terminal(question: str, language: str, subject: str | None, text: str, started: float,
+              llm_results: list[LLMResult], *, status: str, refused: bool, reason: str,
+              best_sim: float = 0.0, reformulations: int = 0, latency: dict | None = None) -> Answer:
+    """Build an early-exit Answer (refusal, off-scope, clarification, blocked)."""
+    lat = latency or {}
+    lat["total_s"] = perf_counter() - started
+    metrics = _aggregate_metrics(llm_results, None, lat, status=status, refused_reason=reason,
+                                 best_similarity=round(best_sim, 3),
+                                 reformulations=reformulations, context_chunks=0)
+    return Answer(question=question, answer=text, refused=refused, language=language,
+                  subject=subject, queries=[], citations=[], contexts=[], metrics=metrics,
+                  status=status)
+
+
 def _refusal(question: str, language: str, subject: str | None, text: str, started: float,
              llm_results: list[LLMResult], *, reason: str, best_sim: float = 0.0,
              reformulations: int = 0, latency: dict | None = None) -> Answer:
-    lat = latency or {}
-    lat["total_s"] = perf_counter() - started
-    metrics = _aggregate_metrics(llm_results, None, lat, refused_reason=reason,
-                                 best_similarity=round(best_sim, 3),
-                                 reformulations=reformulations, context_chunks=0)
-    return Answer(question=question, answer=text, refused=True, language=language,
-                  subject=subject, queries=[], citations=[], contexts=[], metrics=metrics)
+    return _terminal(question, language, subject, text, started, llm_results,
+                     status="refused", refused=True, reason=reason, best_sim=best_sim,
+                     reformulations=reformulations, latency=latency)
 
 
 async def health() -> dict:

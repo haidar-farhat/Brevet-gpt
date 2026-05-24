@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 
 /** One event from the /api/ask/stream SSE feed. */
 export interface BrevetEvent {
-  type: 'log' | 'token' | 'result' | 'error';
+  type: 'log' | 'token' | 'reason_token' | 'result' | 'error';
   [key: string]: any;
 }
 

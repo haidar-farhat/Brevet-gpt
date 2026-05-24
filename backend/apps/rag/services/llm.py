@@ -19,6 +19,7 @@ class LLMResult:
     prompt_tokens: int
     completion_tokens: int
     latency: float
+    finish_reason: str | None = None  # "stop" | "length" (cut off) | ...
 
     @property
     def total_tokens(self) -> int:
@@ -85,11 +86,13 @@ class LMStudioClient:
             raise LLMUnavailable(f"LM Studio request failed: {exc}") from exc
         latency = time.perf_counter() - started
         usage = response.usage
+        choice = response.choices[0]
         return LLMResult(
-            text=response.choices[0].message.content or "",
+            text=choice.message.content or "",
             prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
             completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
             latency=latency,
+            finish_reason=getattr(choice, "finish_reason", None),
         )
 
     async def chat_stream(self, messages: list[dict], on_token, *, temperature: float | None = None,
@@ -103,6 +106,7 @@ class LMStudioClient:
         model = await self.model()
         started = time.perf_counter()
         parts: list[str] = []
+        finish: str | None = None
         try:
             stream = await client.chat.completions.create(
                 model=model,
@@ -114,6 +118,8 @@ class LMStudioClient:
             async for chunk in stream:
                 if not chunk.choices:
                     continue
+                if chunk.choices[0].finish_reason:
+                    finish = chunk.choices[0].finish_reason
                 delta = chunk.choices[0].delta.content or ""
                 if delta:
                     parts.append(delta)
@@ -127,6 +133,7 @@ class LMStudioClient:
             prompt_tokens=count_tokens(prompt_text),
             completion_tokens=count_tokens(text),
             latency=time.perf_counter() - started,
+            finish_reason=finish,
         )
 
     async def chat_json(self, messages: list[dict], **kwargs) -> tuple[dict, LLMResult]:

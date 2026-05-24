@@ -44,16 +44,18 @@ async def agentic_answer(question: str, *, language, subject, top_k, on_event,
         return len(llm_results) < budget["max"]
 
     async def generate_guarded(messages, *, max_tokens=None, label="generate",
-                               stream_as="token", rebuild_leaner=None):
+                               stream_as="token", rebuild_leaner=None, temperature=None):
         """Generate text, streaming each token as ``stream_as`` when on_event is
-        set. Never blanks: if the model streams zero tokens, retry once with a
-        leaner prompt (budget permitting). Appends every LLMResult to llm_results.
-        Returns (sanitized_text, last_result)."""
+        set. Robust: (a) if the model streams zero tokens, retry once with a leaner
+        prompt; (b) if it stops at the token limit (finish_reason=length), continue
+        the answer instead of leaving it truncated. Budget-gated; appends every
+        LLMResult to llm_results. Returns (sanitized_text, last_result)."""
         async def run(msgs):
             if on_event is not None:
                 return await llm.chat_stream(
-                    msgs, lambda d: emit({"type": stream_as, "text": d}), max_tokens=max_tokens)
-            return await llm.chat(msgs, max_tokens=max_tokens)
+                    msgs, lambda d: emit({"type": stream_as, "text": d}),
+                    max_tokens=max_tokens, temperature=temperature)
+            return await llm.chat(msgs, max_tokens=max_tokens, temperature=temperature)
 
         result = await run(messages)
         llm_results.append(result)
@@ -64,6 +66,25 @@ async def agentic_answer(question: str, *, language, subject, top_k, on_event,
             result = await run(rebuild_leaner() if rebuild_leaner else messages)
             llm_results.append(result)
             text = sanitize_answer(result.text)
+        # Continue a cut-off answer (stopped at the token limit) rather than leaving
+        # it truncated mid-step. Bounded by RAG_MAX_CONTINUATIONS and the call budget.
+        conts = 0
+        while (result.finish_reason == "length" and text
+               and conts < settings.RAG_MAX_CONTINUATIONS and can_call()):
+            conts += 1
+            await emit({"type": "log", "stage": label, "level": "warn",
+                        "message": "hit the length limit — continuing the answer"})
+            cont_msgs = list(messages) + [
+                {"role": "assistant", "content": text},
+                {"role": "user", "content": "Continue exactly where you stopped. Do NOT repeat "
+                                            "anything already written; just finish the answer."},
+            ]
+            result = await run(cont_msgs)
+            llm_results.append(result)
+            more = sanitize_answer(result.text)
+            if not more:
+                break
+            text = text + ("" if text.endswith(("\n", " ")) else " ") + more
         return text, result
 
     retriever = get_retriever()
@@ -207,7 +228,7 @@ async def agentic_answer(question: str, *, language, subject, top_k, on_event,
             parts = [question]
         capped = len(parts) > settings.RAG_MAX_SUBPROBLEMS
         parts = parts[: settings.RAG_MAX_SUBPROBLEMS]
-        budget["max"] = max(budget["max"], len(parts) + 5)  # decompose + one solve per part + slack
+        budget["max"] = max(budget["max"], len(parts) + 6)  # decompose + solve/part + continuation slack
         multi = len(parts) > 1
         # The retrieved chapter chunks already CONTAIN the rules/methods (the
         # textbook interleaves lessons + exercises on the same pages). Trim to a
@@ -238,7 +259,8 @@ async def agentic_answer(question: str, *, language, subject, top_k, on_event,
             leaner = (lambda p=part: prompts.build_solve_messages(p, ctx[:1], analysis.language))
             text, last_result = await generate_guarded(
                 msgs, max_tokens=settings.RAG_SOLVE_MAX_TOKENS, label="solve",
-                stream_as="token", rebuild_leaner=leaner)
+                stream_as="token", rebuild_leaner=leaner,
+                temperature=settings.RAG_SOLVE_TEMPERATURE)
             solved.append(f"{header}{text}")
         answer_text = "\n\n".join(b for b in solved if b.strip())
 

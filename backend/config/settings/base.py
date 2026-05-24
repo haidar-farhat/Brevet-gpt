@@ -215,8 +215,12 @@ RAG_MAX_SUBPROBLEMS = env.int("RAG_MAX_SUBPROBLEMS", default=12)   # safety cap 
 RAG_SOLVE_TOP_K = env.int("RAG_SOLVE_TOP_K", default=3)            # chunks fed to each part
 RAG_SOLVE_CONTEXT_TOKENS = env.int("RAG_SOLVE_CONTEXT_TOKENS", default=1400)
 RAG_SOLVE_MAX_TOKENS = env.int("RAG_SOLVE_MAX_TOKENS", default=1000)  # room for a multi-task part
+RAG_SOLVE_TEMPERATURE = env.float("RAG_SOLVE_TEMPERATURE", default=0.0)  # deterministic maths
 # Retry a generation once with a leaner prompt when it streams zero tokens.
 RAG_SOLVE_RETRY_EMPTY = env.bool("RAG_SOLVE_RETRY_EMPTY", default=True)
+# Auto-continue an answer the model cut off at the token limit (finish_reason=length),
+# instead of leaving it truncated mid-step. Bounded + budget-gated.
+RAG_MAX_CONTINUATIONS = env.int("RAG_MAX_CONTINUATIONS", default=2)
 
 # Never silently drop a long worksheet; only truncate beyond this hard cap.
 RAG_MAX_QUESTION_CHARS = env.int("RAG_MAX_QUESTION_CHARS", default=6000)

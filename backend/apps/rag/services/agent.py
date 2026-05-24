@@ -189,10 +189,12 @@ async def agentic_answer(question: str, *, language, subject, top_k, on_event,
     # the reasoning, and small prompts avoid the empty-output overload that a
     # monolith prompt causes on a small local model. ---------------------
     # The LLM's is_problem flag is unreliable on a small model, so OR it with a
-    # deterministic heuristic (solve-verbs / numbered parts + equations).
-    solving = (settings.RAG_SOLVE
-               and (analysis.is_problem or reformulation.looks_like_problem(question))
-               and analysis.subject in settings.RAG_REASON_SUBJECTS)
+    # deterministic heuristic (solve-verbs / numbered parts + equations). Solve in
+    # the problem-solving subjects, OR when the subject is unknown (a long worksheet
+    # often routes to no subject — we still want to solve it, not dump a monolith).
+    problemlike = analysis.is_problem or reformulation.looks_like_problem(question)
+    subject_ok = analysis.subject in settings.RAG_REASON_SUBJECTS or analysis.subject is None
+    solving = settings.RAG_SOLVE and problemlike and subject_ok
     if solving:
         from apps.catalog.services.chunking import count_tokens
 
@@ -207,11 +209,25 @@ async def agentic_answer(question: str, *, language, subject, top_k, on_event,
             parts = [question]
         capped = len(parts) > settings.RAG_MAX_SUBPROBLEMS
         parts = parts[: settings.RAG_MAX_SUBPROBLEMS]
-        budget["max"] = max(budget["max"], len(parts) + 6)  # decompose + per-part + assemble + slack
+        budget["max"] = max(budget["max"], len(parts) + 8)  # decompose + rules + per-part + assemble
         multi = len(parts) > 1
-        # Every part shares the topic's retrieved rules; trim once to a small window.
+
+        # Fetch the RULES / how-to, NOT other similar example exercises: name the
+        # lessons this problem needs and retrieve the theory for them. Falls back
+        # to the broad context if rule lookup yields nothing.
+        rule_chunks = selected
+        if can_call():
+            rules, rules_result = await reformulation.identify_rules(llm, question, language=analysis.language)
+            llm_results.append(rules_result)
+            if rules:
+                await emit({"type": "log", "stage": "solve",
+                            "message": f"looking up the rules: {', '.join(rules)}"})
+                rc, _rc_sim, _ = await do_retrieve(rules, analysis.subject)
+                if rc:
+                    rule_chunks = rc
+        # Every part shares these rules; trim once to a small, focused window.
         ctx = retriever.select_within_budget(
-            selected, top_k=settings.RAG_SOLVE_TOP_K, token_budget=settings.RAG_SOLVE_CONTEXT_TOKENS)
+            rule_chunks, top_k=settings.RAG_SOLVE_TOP_K, token_budget=settings.RAG_SOLVE_CONTEXT_TOKENS)
         await emit({"type": "log", "stage": "solve",
                     "message": f"solving {len(parts)} part(s) step by step"})
 

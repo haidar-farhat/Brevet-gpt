@@ -109,6 +109,19 @@ without seeing the other parts.
 - Keep the original wording and numbers. Do NOT solve anything here. Use the same language as the problem.\
 """
 
+# Identify the underlying rules/lessons a problem needs, so retrieval fetches the
+# THEORY (how-to) rather than other similar worked exercises.
+RULES_SYSTEM = """\
+You identify the RULES, methods and lessons needed to solve an exercise, so a textbook search can \
+fetch the THEORY (definitions, rules, worked methods) — NOT other similar exercises.
+Respond with JSON ONLY: {"rules": ["...", "..."]}
+- 2 to 6 short lesson-style phrases naming the concepts/rules/methods involved, e.g. "degree of a \
+polynomial", "combining like terms", "factoring a difference of squares", "roots of a polynomial", \
+"value of a polynomial at a number", "solving a rational equation and its excluded values".
+- Name the GENERAL rule or lesson — never the specific numbers from this exercise.
+- Use the same language as the problem. Do NOT solve anything.\
+"""
+
 BROADEN_SYSTEM = """\
 The previous search queries returned weak results for a Brevet textbook search.
 Respond with JSON ONLY: {"search_queries": ["...", "..."]}

@@ -214,7 +214,7 @@ RAG_SOLVE = env.bool("RAG_SOLVE", default=True)
 RAG_MAX_SUBPROBLEMS = env.int("RAG_MAX_SUBPROBLEMS", default=12)   # safety cap (covers a 9-part sheet)
 RAG_SOLVE_TOP_K = env.int("RAG_SOLVE_TOP_K", default=3)            # chunks fed to each part
 RAG_SOLVE_CONTEXT_TOKENS = env.int("RAG_SOLVE_CONTEXT_TOKENS", default=1400)
-RAG_SOLVE_MAX_TOKENS = env.int("RAG_SOLVE_MAX_TOKENS", default=700)
+RAG_SOLVE_MAX_TOKENS = env.int("RAG_SOLVE_MAX_TOKENS", default=1000)  # room for a multi-task part
 # Retry a generation once with a leaner prompt when it streams zero tokens.
 RAG_SOLVE_RETRY_EMPTY = env.bool("RAG_SOLVE_RETRY_EMPTY", default=True)
 

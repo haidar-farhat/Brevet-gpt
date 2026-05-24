@@ -196,8 +196,6 @@ async def agentic_answer(question: str, *, language, subject, top_k, on_event,
     subject_ok = analysis.subject in settings.RAG_REASON_SUBJECTS or analysis.subject is None
     solving = settings.RAG_SOLVE and problemlike and subject_ok
     if solving:
-        from apps.catalog.services.chunking import count_tokens
-
         # Decompose with a dedicated call (routing JSON is kept small for
         # reliability); fall back to solving the whole question if it yields nothing.
         parts = list(analysis.sub_problems)
@@ -209,18 +207,23 @@ async def agentic_answer(question: str, *, language, subject, top_k, on_event,
             parts = [question]
         capped = len(parts) > settings.RAG_MAX_SUBPROBLEMS
         parts = parts[: settings.RAG_MAX_SUBPROBLEMS]
-        budget["max"] = max(budget["max"], len(parts) + 6)  # decompose + per-part + assemble + slack
+        budget["max"] = max(budget["max"], len(parts) + 5)  # decompose + one solve per part + slack
         multi = len(parts) > 1
         # The retrieved chapter chunks already CONTAIN the rules/methods (the
         # textbook interleaves lessons + exercises on the same pages). Trim to a
         # small focused window — SOLVE_SYSTEM tells the model to extract and apply
-        # the RULE rather than copy a similar example, and the small prompt is what
-        # stops a small model from choking on a long monolith.
+        # the RULE, and the small prompt is what stops a small model from choking.
         ctx = retriever.select_within_budget(
             selected, top_k=settings.RAG_SOLVE_TOP_K, token_budget=settings.RAG_SOLVE_CONTEXT_TOKENS)
         await emit({"type": "log", "stage": "solve",
                     "message": f"solving {len(parts)} part(s) step by step"})
 
+        # Solve each part and stream its COMPLETE solution straight into the answer
+        # under a clean "## Part i" header, then locally join. No second LLM
+        # "assemble" pass: re-emitting every part is what truncated long worksheets
+        # and dropped "## Part" fragments mid-sentence. Joining complete parts can't
+        # truncate or corrupt the output.
+        part_word = {"fr": "Partie"}.get(analysis.language, "Part")
         t_solve = perf_counter()
         solved: list[str] = []
         last_result: LLMResult | None = None
@@ -228,31 +231,16 @@ async def agentic_answer(question: str, *, language, subject, top_k, on_event,
             if not can_call():
                 break
             await emit({"type": "log", "stage": "solve", "message": f"Part {i}/{len(parts)}: {part[:80]}"})
+            header = f"## {part_word} {i}\n\n" if multi else ""
+            if header and on_event is not None:
+                await emit({"type": "token", "text": header})  # show the header live
             msgs = prompts.build_solve_messages(part, ctx, analysis.language)
             leaner = (lambda p=part: prompts.build_solve_messages(p, ctx[:1], analysis.language))
-            # Multi-part: stream the working into the "Thinking" segment; the clean
-            # combined answer is streamed separately below (avoids duplication).
             text, last_result = await generate_guarded(
                 msgs, max_tokens=settings.RAG_SOLVE_MAX_TOKENS, label="solve",
-                stream_as=("reason_token" if multi else "token"), rebuild_leaner=leaner)
-            solved.append(f"## Part {i}\n\n{text}" if multi else text)
-
-        # Assemble: LLM-stitch only when the combined parts are small enough to
-        # stay reliable; otherwise join locally (also the path when the budget
-        # is spent). Either way the answer is complete and never blank.
-        if multi:
-            joined = "\n\n".join(solved)
-            if can_call() and solved and count_tokens(joined) <= settings.RAG_SOLVE_CONTEXT_TOKENS:
-                await emit({"type": "log", "stage": "solve", "message": "assembling the full answer"})
-                answer_text, last_result = await generate_guarded(
-                    prompts.build_assemble_messages(question, solved, analysis.language),
-                    label="solve", stream_as="token")
-                if not answer_text:
-                    answer_text = joined
-            else:
-                answer_text = joined
-        else:
-            answer_text = solved[0] if solved else ""
+                stream_as="token", rebuild_leaner=leaner)
+            solved.append(f"{header}{text}")
+        answer_text = "\n\n".join(b for b in solved if b.strip())
 
         if capped:
             answer_text += {"en": f"\n\n_(Showing the first {len(parts)} parts.)_",

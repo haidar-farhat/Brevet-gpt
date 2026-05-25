@@ -1,0 +1,22 @@
+# Source assets (scanned books / images) — not version controlled
+/assets/
+
+# --- Python / Django backend ---
+backend/.venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Secrets & local config
+.env
+backend/.env
+
+# Django runtime artifacts
+backend/staticfiles/
+*.log
+*.sqlite3
+
+# Vector store (persistent ChromaDB)
+/chroma/
+

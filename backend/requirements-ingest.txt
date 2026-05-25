@@ -1,0 +1,27 @@
+# Ingestion / embedding pipeline (kept separate from the web requirements).
+# Install into the same venv:  pip install -r requirements-ingest.txt
+
+# Vector store
+chromadb~=1.0
+tiktoken~=0.8
+
+# Local CPU embeddings (default backend). Pulls a CPU-only torch.
+sentence-transformers>=3.0,<6
+# Pin transformers to the stable 4.x line: 5.x (e.g. 5.9.0) segfaults on Windows
+# when a second model is loaded alongside bge-m3 (native access violation).
+transformers>=4.41,<5
+
+# OpenAI client — used for LM Studio generation (OpenAI-compatible API) and,
+# optionally, OpenAI embeddings when EMBEDDING_BACKEND=openai.
+openai>=1.40,<3
+
+# ASGI server for the `brevet` run command (async API).
+uvicorn>=0.30
+
+# OCR runtime — needed only by the `ocr_embed` command, which reuses
+# gpu_ocr_books.py. (PyMuPDF is already pinned in requirements.txt.)
+numpy~=2.0
+opencv-python-headless~=4.10
+pytesseract~=0.3
+reportlab~=4.2
+tqdm~=4.66

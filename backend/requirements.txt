@@ -1,0 +1,14 @@
+# Pinned to the 4.2 LTS line: Django 5.1+ requires MariaDB 10.5+, but the local
+# XAMPP server is MariaDB 10.4. Bump to Django 5.2 LTS once the DB is >= 10.5.
+Django~=4.2
+
+# Configuration & database
+django-environ~=0.11
+mysqlclient~=2.2
+
+# CORS for the Angular dev frontend
+django-cors-headers~=4.4
+
+# Read titles / page counts from the source PDFs during `seed` (optional at
+# runtime: the seed degrades gracefully if this import is unavailable).
+PyMuPDF~=1.24

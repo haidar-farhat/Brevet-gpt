@@ -33,13 +33,19 @@ class SemanticCache:
     def __init__(self, min_sim: float) -> None:
         self.min_sim = min_sim
 
-    def get(self, query_vec, language=None, subject=None):
-        """Return a cached Answer for a near-identical question, else None."""
+    def get(self, query_vec, language=None, subject=None, grade=None):
+        """Return a cached Answer for a near-identical question, else None.
+
+        ``grade`` is matched exactly (via a Chroma ``where``): unlike language/topic
+        — which the embedding already captures — the grade scope narrows the *corpus*
+        without changing the question text, so a g7-scoped query must not reuse a
+        g9-scoped answer."""
         col = _get_collection()
         try:
             if col.count() == 0:
                 return None
-            res = col.query(query_embeddings=[query_vec], n_results=1, include=["distances", "documents"])
+            res = col.query(query_embeddings=[query_vec], n_results=1,
+                            where={"grade": grade or ""}, include=["distances", "documents"])
         except Exception:
             return None
         ids = (res.get("ids") or [[]])[0]
@@ -65,7 +71,7 @@ class SemanticCache:
         except TypeError:
             return None  # schema drift — treat as a miss
 
-    def put(self, question, query_vec, answer, language=None, subject=None) -> None:
+    def put(self, question, query_vec, answer, language=None, subject=None, grade=None) -> None:
         col = _get_collection()
         try:
             col.upsert(
@@ -75,6 +81,7 @@ class SemanticCache:
                 metadatas=[{
                     "language": language or answer.language or "",
                     "subject": subject or answer.subject or "",
+                    "grade": grade or "",
                 }],
             )
         except Exception:

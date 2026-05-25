@@ -5,6 +5,7 @@ import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { BrevetEvent, BrevetService } from './brevet.service';
 import { renderRich } from './format';
 import { ManageComponent } from './manage.component';
+import { MaterialsService } from './materials.service';
 
 interface LogLine {
   stage: string;
@@ -54,6 +55,8 @@ export class App {
   readonly question = signal('');
   readonly language = signal<'auto' | 'en' | 'fr'>('auto');
   readonly subject = signal('');
+  readonly grade = signal('');                                   // '' = all grades
+  readonly grades = signal<{ code: string; name: string }[]>([]);
 
   // Run state
   readonly busy = signal(false);
@@ -120,7 +123,14 @@ export class App {
     };
   });
 
-  constructor(private readonly api: BrevetService, private readonly sanitizer: DomSanitizer) {}
+  constructor(
+    private readonly api: BrevetService,
+    private readonly sanitizer: DomSanitizer,
+    private readonly materials: MaterialsService,
+  ) {
+    // Populate the grade selector from the catalog taxonomy (best-effort).
+    this.materials.taxonomy().then((t) => this.grades.set(t.grades)).catch(() => {});
+  }
 
   /** Final answer rendered as Markdown + LaTeX (used once streaming finishes). */
   renderedAnswer(): SafeHtml {
@@ -212,6 +222,7 @@ export class App {
 
     const lang = this.language() === 'auto' ? null : this.language();
     const subject = this.subject().trim() || null;
+    const grade = this.grade() || null;
     this.abort = new AbortController();
 
     await this.api.ask(q, lang, subject, {
@@ -222,7 +233,7 @@ export class App {
         this.stage.set('done');
         this.abort = null;
       },
-    }, this.abort.signal);
+    }, this.abort.signal, grade);
   }
 
   /** Abort an in-flight query (the SSE fetch is cancelled via AbortSignal). */

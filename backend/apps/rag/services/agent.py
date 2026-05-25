@@ -27,7 +27,7 @@ from apps.rag.services.llm import LLMResult, LMStudioClient
 from apps.rag.services.rerank import dense_rerank, rerank_chunks
 
 
-async def agentic_answer(question: str, *, language, subject, top_k, on_event,
+async def agentic_answer(question: str, *, language, subject, grade_code=None, top_k, on_event,
                          llm: LMStudioClient, started: float, llm_results: list[LLMResult]):
     from apps.rag.services.pipeline import (  # lazy: avoid circular import
         Answer, _aggregate_metrics, _citation, _context, _refusal, _terminal,
@@ -142,7 +142,8 @@ async def agentic_answer(question: str, *, language, subject, top_k, on_event,
         # subjects so a mis-route can't exclude the right chunks.
         effective_subj = subj if settings.RAG_SUBJECT_FILTER else None
         cands, sim = await asyncio.to_thread(
-            retriever.retrieve_candidates, queries, analysis.language, effective_subj, candidates=candidates_k
+            retriever.retrieve_candidates, queries, analysis.language, effective_subj,
+            candidates=candidates_k, grade=grade_code,
         )
         mode = None
         if cands:

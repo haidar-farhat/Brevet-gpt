@@ -5,6 +5,8 @@ export interface MaterialBook {
   title: string;
   language: string;
   subject: string;
+  school: string | null;
+  grade: string | null;
   level: string;
   status: 'active' | 'frozen';
   total_pages: number | null;
@@ -12,6 +14,14 @@ export interface MaterialBook {
   content_hash: string;
   replaces: number | null;
   processed_at: string | null;
+}
+
+/** Routing vocabularies for the dropdowns (from GET /api/taxonomy). */
+export interface Taxonomy {
+  languages: { code: string; name: string; native_name: string }[];
+  schools: { code: string; name: string }[];
+  grades: { code: string; name: string; ordinal: number }[];
+  subjects: { code: string; name_en: string; name_fr: string }[];
 }
 
 export interface DupMatch {
@@ -40,6 +50,8 @@ export interface UploadMeta {
   title: string;
   language: string;
   subject: string;
+  school?: string | null;
+  grade?: string | null;
   level: string;
   resolution?: string | null;
   target_id?: number | null;
@@ -49,6 +61,12 @@ export interface UploadMeta {
 @Injectable({ providedIn: 'root' })
 export class MaterialsService {
   private readonly base = 'http://localhost:8000';
+
+  async taxonomy(): Promise<Taxonomy> {
+    const res = await fetch(`${this.base}/api/taxonomy`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
 
   async list(filters: Record<string, string | null> = {}): Promise<{ books: MaterialBook[]; ingest_in_progress: boolean }> {
     const qs = Object.entries(filters)
@@ -103,6 +121,8 @@ export class MaterialsService {
     form.append('title', meta.title);
     form.append('language', meta.language);
     form.append('subject', meta.subject);
+    if (meta.school) form.append('school', meta.school);
+    if (meta.grade) form.append('grade', meta.grade);
     form.append('level', meta.level || 'brevet');
     if (meta.resolution) form.append('resolution', meta.resolution);
     if (meta.target_id != null) form.append('target_id', String(meta.target_id));

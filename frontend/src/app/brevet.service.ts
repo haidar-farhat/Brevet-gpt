@@ -28,10 +28,12 @@ export class BrevetService {
     subject: string | null,
     handlers: AskHandlers,
     signal?: AbortSignal,
+    grade?: string | null,
   ): Promise<void> {
     const body: Record<string, unknown> = { question };
     if (language) body['language'] = language;
     if (subject) body['subject'] = subject;
+    if (grade) body['grade'] = grade;
 
     let response: Response;
     try {

@@ -30,6 +30,11 @@ const UP_STAGE: Record<string, string> = {
 export class ManageComponent {
   readonly subjects = SUBJECTS;
 
+  // Routing vocabularies (from /api/taxonomy)
+  readonly languages = signal<{ code: string; name: string; native_name: string }[]>([]);
+  readonly schools = signal<{ code: string; name: string }[]>([]);
+  readonly grades = signal<{ code: string; name: string; ordinal: number }[]>([]);
+
   // Library list + filters
   readonly books = signal<MaterialBook[]>([]);
   readonly loading = signal(false);
@@ -37,14 +42,17 @@ export class ManageComponent {
   readonly fStatus = signal('');
   readonly fSubject = signal('');
   readonly fLang = signal('');
+  readonly fGrade = signal('');
   readonly fQuery = signal('');
 
   // Upload form
   readonly file = signal<File | null>(null);
   readonly fileName = signal('');
   readonly upTitle = signal('');
-  readonly upLang = signal<'en' | 'fr'>('en');
+  readonly upLang = signal('en');
   readonly upSubject = signal('');
+  readonly upSchool = signal('');
+  readonly upGrade = signal('g9');
   readonly upLevel = signal('brevet');
 
   // Upload run state
@@ -66,7 +74,23 @@ export class ManageComponent {
   );
 
   constructor(private readonly api: MaterialsService) {
+    this.loadTaxonomy();
     this.refresh();
+  }
+
+  private async loadTaxonomy(): Promise<void> {
+    try {
+      const t = await this.api.taxonomy();
+      this.languages.set(t.languages);
+      this.schools.set(t.schools);
+      this.grades.set(t.grades);
+      if (t.languages.length && !t.languages.some((l) => l.code === this.upLang())) {
+        this.upLang.set(t.languages[0].code);
+      }
+      if (t.schools.length) this.upSchool.set(t.schools[0].code);
+    } catch {
+      /* taxonomy unavailable — dropdowns fall back to empty */
+    }
   }
 
   // ---------------- library ----------------
@@ -77,6 +101,7 @@ export class ManageComponent {
         status: this.fStatus() || null,
         subject: this.fSubject() || null,
         language: this.fLang() || null,
+        grade: this.fGrade() || null,
         q: this.fQuery().trim() || null,
       });
       this.books.set(res.books);
@@ -150,6 +175,8 @@ export class ManageComponent {
         title: this.upTitle().trim(),
         language: this.upLang(),
         subject: this.upSubject(),
+        school: this.upSchool() || null,
+        grade: this.upGrade() || null,
         level: this.upLevel().trim() || 'brevet',
         resolution,
         target_id: targetId,

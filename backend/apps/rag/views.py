@@ -13,7 +13,7 @@ _JSON = {"ensure_ascii": False}
 
 
 def _read_question(request):
-    """Parse + validate the {question, language?, subject?, top_k?} body."""
+    """Parse + validate the {question, language?, subject?, grade?, top_k?} body."""
     try:
         payload = json.loads(request.body or b"{}")
     except json.JSONDecodeError:
@@ -40,6 +40,7 @@ async def ask_view(request):
             question,
             language=payload.get("language"),
             subject=payload.get("subject"),
+            grade=payload.get("grade"),
             top_k=payload.get("top_k"),
         )
     except LLMUnavailable as exc:
@@ -73,7 +74,8 @@ async def ask_stream_view(request):
         try:
             answer = await answer_question(
                 payload["question"].strip(), language=payload.get("language"),
-                subject=payload.get("subject"), top_k=payload.get("top_k"), on_event=on_event,
+                subject=payload.get("subject"), grade=payload.get("grade"),
+                top_k=payload.get("top_k"), on_event=on_event,
             )
             await queue.put({"type": "result", **answer.to_dict()})
         except LLMUnavailable as exc:

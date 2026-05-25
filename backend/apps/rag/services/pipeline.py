@@ -95,8 +95,8 @@ def nonempty_answer(text: str, language: str) -> str:
 
 
 async def answer_question(question: str, *, language: str | None = None,
-                          subject: str | None = None, top_k: int | None = None,
-                          on_event=None) -> Answer:
+                          subject: str | None = None, grade: str | None = None,
+                          top_k: int | None = None, on_event=None) -> Answer:
     """Answer a question. If ``on_event`` (async callable) is given, emit live
     log events per stage and stream the answer tokens, for the web terminal."""
     started = perf_counter()
@@ -128,7 +128,7 @@ async def answer_question(question: str, *, language: str | None = None,
         from apps.rag.services.cache import get_cache
         try:
             query_vec = (await asyncio.to_thread(get_retriever().embedder.embed, [question]))[0]
-            hit = await asyncio.to_thread(get_cache().get, query_vec, language, subject)
+            hit = await asyncio.to_thread(get_cache().get, query_vec, language, subject, grade)
         except Exception:
             hit = None
         if hit is not None:
@@ -139,25 +139,25 @@ async def answer_question(question: str, *, language: str | None = None,
     if settings.RAG_AGENTIC:
         from apps.rag.services import agent
         answer = await agent.agentic_answer(
-            question, language=language, subject=subject, top_k=top_k,
+            question, language=language, subject=subject, grade_code=grade, top_k=top_k,
             on_event=on_event, llm=llm, started=started, llm_results=llm_results,
         )
     else:
         answer = await _simple_answer(
-            question, language=language, subject=subject, top_k=top_k,
+            question, language=language, subject=subject, grade=grade, top_k=top_k,
             on_event=on_event, llm=llm, started=started, llm_results=llm_results,
         )
 
     # --- Store successful answers in the cache --------------------------
     if settings.RAG_CACHE and query_vec is not None and answer.status == "answer" and not answer.refused:
         try:
-            await asyncio.to_thread(get_cache().put, question, query_vec, answer, language, subject)
+            await asyncio.to_thread(get_cache().put, question, query_vec, answer, language, subject, grade)
         except Exception:
             pass
     return answer
 
 
-async def _simple_answer(question: str, *, language, subject, top_k, on_event,
+async def _simple_answer(question: str, *, language, subject, grade, top_k, on_event,
                          llm: LMStudioClient, started: float, llm_results: list[LLMResult]) -> Answer:
     """The original linear pipeline (used when RAG_AGENTIC=False)."""
 
@@ -181,7 +181,7 @@ async def _simple_answer(question: str, *, language, subject, top_k, on_event,
     t0 = perf_counter()
     selected, best_sim = await asyncio.to_thread(
         retriever.retrieve, plan.queries, plan.language, plan.subject,
-        candidates=candidates, top_k=k, token_budget=budget,
+        candidates=candidates, top_k=k, token_budget=budget, grade=grade,
     )
     reformulations = 0
     while best_sim < min_rel and reformulations < settings.RAG_MAX_REFORMULATIONS:
@@ -195,7 +195,7 @@ async def _simple_answer(question: str, *, language, subject, top_k, on_event,
         # drop the subject filter on retries to widen the net
         retry_sel, retry_sim = await asyncio.to_thread(
             retriever.retrieve, extra_queries, plan.language, None,
-            candidates=candidates, top_k=k, token_budget=budget,
+            candidates=candidates, top_k=k, token_budget=budget, grade=grade,
         )
         if retry_sim > best_sim:
             selected, best_sim = retry_sel, retry_sim

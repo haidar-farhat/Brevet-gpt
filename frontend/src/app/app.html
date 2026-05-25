@@ -36,6 +36,10 @@
         <option value="">Any subject</option>
         @for (s of subjects; track s) { <option [value]="s">{{ s }}</option> }
       </select>
+      <select class="subject" [ngModel]="grade()" (ngModelChange)="grade.set($event)" [disabled]="busy()">
+        <option value="">All grades</option>
+        @for (g of grades(); track g.code) { <option [value]="g.code">{{ g.name }}</option> }
+      </select>
       <button class="ask-btn" (click)="ask()" [disabled]="busy()">{{ busy() ? 'Working…' : 'Ask ▷' }}</button>
       @if (busy()) { <button class="stop-btn" (click)="stop()" title="Stop the current query">■ Stop</button> }
     </div>

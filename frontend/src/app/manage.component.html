@@ -16,12 +16,19 @@
 
     <div class="row">
       <div class="seg-ctrl" role="group" aria-label="language">
-        <button [class.on]="upLang()==='en'" (click)="upLang.set('en')" [disabled]="uploading()">EN</button>
-        <button [class.on]="upLang()==='fr'" (click)="upLang.set('fr')" [disabled]="uploading()">FR</button>
+        @for (l of languages(); track l.code) {
+          <button [class.on]="upLang()===l.code" (click)="upLang.set(l.code)" [disabled]="uploading()" [title]="l.name">{{ l.code.toUpperCase() }}</button>
+        }
       </div>
       <select class="subject" [ngModel]="upSubject()" (ngModelChange)="upSubject.set($event)" [disabled]="uploading()">
         <option value="">Subject…</option>
         @for (s of subjects; track s) { <option [value]="s">{{ s }}</option> }
+      </select>
+      <select class="subject" [ngModel]="upSchool()" (ngModelChange)="upSchool.set($event)" [disabled]="uploading()" title="School">
+        @for (sc of schools(); track sc.code) { <option [value]="sc.code">{{ sc.name }}</option> }
+      </select>
+      <select class="subject" [ngModel]="upGrade()" (ngModelChange)="upGrade.set($event)" [disabled]="uploading()" title="Grade">
+        @for (g of grades(); track g.code) { <option [value]="g.code">{{ g.name }}</option> }
       </select>
       <input class="ip lvl" placeholder="Level" [ngModel]="upLevel()" (ngModelChange)="upLevel.set($event)" [disabled]="uploading()" />
       <button class="btn" (click)="startUpload()" [disabled]="!canUpload()">{{ uploading() ? 'Working…' : 'Upload ▷' }}</button>
@@ -70,6 +77,10 @@
         <option value="">any subject</option>
         @for (s of subjects; track s) { <option [value]="s">{{ s }}</option> }
       </select>
+      <select class="subject" [ngModel]="fGrade()" (ngModelChange)="fGrade.set($event); refresh()">
+        <option value="">any grade</option>
+        @for (g of grades(); track g.code) { <option [value]="g.code">{{ g.name }}</option> }
+      </select>
       <input class="ip" placeholder="filter title…" [ngModel]="fQuery()" (ngModelChange)="fQuery.set($event)" (keyup.enter)="refresh()" />
       <button class="mini" (click)="refresh()" title="refresh">↻</button>
     </div>
@@ -78,7 +89,7 @@
     @else if (!books().length) { <div class="muted">no materials yet — upload one above.</div> }
     @else {
       <table class="lib">
-        <thead><tr><th>Title</th><th>Subj</th><th>Lang</th><th>Pages</th><th>Chunks</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Title</th><th>Subj</th><th>Lang</th><th>Grade</th><th>Pages</th><th>Chunks</th><th>Status</th><th></th></tr></thead>
         <tbody>
           @for (b of books(); track b.id) {
             <tr [class.frozen]="b.status==='frozen'">
@@ -88,6 +99,7 @@
               </td>
               <td>{{ b.subject }}</td>
               <td>{{ b.language }}</td>
+              <td>{{ b.grade ?? '—' }}</td>
               <td>{{ b.total_pages ?? '—' }}</td>
               <td>{{ b.chunks }}</td>
               <td><span class="badge {{ b.status==='active' ? 'good' : 'ok' }}">{{ b.status }}</span></td>

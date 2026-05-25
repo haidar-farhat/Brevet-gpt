@@ -17,8 +17,9 @@ from pathlib import Path
 from django.conf import settings
 from django.utils import timezone
 
+from apps.catalog.data import taxonomy
 from apps.catalog.enums import BookStatus
-from apps.catalog.models import Book, Subject
+from apps.catalog.models import Book, Grade, Language, School, Subject
 from apps.catalog.services import intake
 from apps.catalog.services import ocr as ocr_svc
 from apps.catalog.services.ingest import document_hash, ingest_book
@@ -86,6 +87,11 @@ def _lang_folder(language: str) -> str:
     return folder or language or "other"
 
 
+def valid_language_codes() -> set[str]:
+    """Codes the UI may submit — enabled languages in the registry (with fallback)."""
+    return set(ocr_svc.lang_map())
+
+
 def save_upload(language: str, filename: str, chunks) -> Path:
     """Stream the uploaded file to UPLOADS_DIR/{lang}/ and return its path."""
     folder = Path(settings.UPLOADS_DIR) / _lang_folder(language)
@@ -126,15 +132,41 @@ def precheck(*, title: str, language: str, subject_code: str, content_hash: str 
     return None
 
 
-# --- browse -----------------------------------------------------------------
-def list_books(*, status=None, subject=None, language=None, q=None) -> list[dict]:
-    qs = Book.objects.select_related("subject", "replaces").all()
+# --- taxonomy / browse ------------------------------------------------------
+def taxonomy() -> dict:
+    """Routing vocabularies for the Manage/Study dropdowns (enabled rows only)."""
+    return {
+        "languages": [
+            {"code": l.code, "name": l.name, "native_name": l.native_name}
+            for l in Language.objects.filter(enabled=True)
+        ],
+        "schools": [
+            {"code": s.code, "name": s.name} for s in School.objects.filter(enabled=True)
+        ],
+        "grades": [
+            {"code": g.code, "name": g.name, "ordinal": g.ordinal}
+            for g in Grade.objects.filter(enabled=True)
+        ],
+        "subjects": [
+            {"code": s.code, "name_en": s.name_en, "name_fr": s.name_fr}
+            for s in Subject.objects.all()
+        ],
+    }
+
+
+def list_books(*, status=None, subject=None, language=None, school=None,
+               grade=None, q=None) -> list[dict]:
+    qs = Book.objects.select_related("subject", "replaces", "school", "grade").all()
     if status:
         qs = qs.filter(status=status)
     if subject:
         qs = qs.filter(subject__code=subject)
     if language:
         qs = qs.filter(language=language)
+    if school:
+        qs = qs.filter(school__code=school)
+    if grade:
+        qs = qs.filter(grade__code=grade)
     if q:
         qs = qs.filter(title__icontains=q)
     return [
@@ -143,6 +175,8 @@ def list_books(*, status=None, subject=None, language=None, q=None) -> list[dict
             "title": b.title,
             "language": b.language,
             "subject": b.subject.code,
+            "school": b.school.code if b.school_id else None,
+            "grade": b.grade.code if b.grade_id else None,
             "level": b.level,
             "status": b.status,
             "total_pages": b.total_pages,
@@ -156,7 +190,7 @@ def list_books(*, status=None, subject=None, language=None, q=None) -> list[dict
 
 
 def book_detail(book_id: int, *, offset: int = 0, limit: int = 50) -> dict:
-    book = Book.objects.select_related("subject").get(pk=book_id)
+    book = Book.objects.select_related("subject", "school", "grade").get(pk=book_id)
     total = book.chunks.count()
     chunks = (
         book.chunks.order_by("chunk_index")
@@ -167,7 +201,10 @@ def book_detail(book_id: int, *, offset: int = 0, limit: int = 50) -> dict:
     items = [{**c, "content": c["content"][:600]} for c in chunks]
     return {
         "id": book.id, "title": book.title, "language": book.language,
-        "subject": book.subject.code, "level": book.level, "status": book.status,
+        "subject": book.subject.code,
+        "school": book.school.code if book.school_id else None,
+        "grade": book.grade.code if book.grade_id else None,
+        "level": book.level, "status": book.status,
         "total_pages": book.total_pages, "chunk_count": total,
         "offset": offset, "limit": limit, "chunks": items,
     }
@@ -211,6 +248,7 @@ def _noop(*_a, **_k) -> None:
 
 
 def run_upload(*, src_path, language: str, subject_code: str, title: str, level: str = "brevet",
+               school_code: str | None = None, grade_code: str | None = None,
                resolution: str | None = None, target_id: int | None = None, on_stage=_noop) -> dict:
     """Parse + embed an already-saved upload. Raises NeedsDecision (duplicate) or
     UploadError. Returns a summary dict on success. One ingest at a time."""
@@ -219,6 +257,9 @@ def run_upload(*, src_path, language: str, subject_code: str, title: str, level:
     try:
         on_stage("validate", "preparing")
         subject = Subject.objects.get(code=subject_code)
+        # Classification — default to the corpus umbrella (Lebanese Brevet / Grade 9).
+        school = School.objects.filter(code=school_code or taxonomy.DEFAULT_SCHOOL[1]).first()
+        grade = Grade.objects.filter(code=grade_code or taxonomy.DEFAULT_GRADE_CODE).first()
         title = (title or "").strip() or Path(src_path).stem
 
         # 1) cheap metadata dedup — BEFORE any OCR
@@ -248,7 +289,7 @@ def run_upload(*, src_path, language: str, subject_code: str, title: str, level:
         book = _resolve_target_book(
             resolution=resolution, target_id=target_id, language=language,
             filename=Path(src_path).name, title=title, subject=subject, level=level,
-            meta=meta, content_hash=content_hash,
+            school=school, grade=grade, meta=meta, content_hash=content_hash,
         )
         result = ingest_book(book=book, records=records, embedder=embedder, collection=collection)
         on_stage("store", "saved")
@@ -261,10 +302,10 @@ def run_upload(*, src_path, language: str, subject_code: str, title: str, level:
 
 
 def _resolve_target_book(*, resolution, target_id, language, filename, title, subject, level,
-                         meta, content_hash) -> Book:
+                         school, grade, meta, content_hash) -> Book:
     source_file = f"{_lang_folder(language)}/{sanitize_filename(filename)}"
     defaults = {
-        "title": title, "subject": subject, "level": level,
+        "title": title, "subject": subject, "school": school, "grade": grade, "level": level,
         "pdf_path": meta.pdf_path, "total_pages": meta.total_pages,
         "content_hash": content_hash, "status": BookStatus.ACTIVE,
         "processed_at": timezone.now(),

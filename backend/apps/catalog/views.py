@@ -22,6 +22,17 @@ def _err(message: str, status: int = 400):
     return JsonResponse({"error": message}, status=status)
 
 
+# --- taxonomy ---------------------------------------------------------------
+async def taxonomy_view(request):
+    if request.method != "GET":
+        return _err("GET required", 405)
+    data = await asyncio.to_thread(materials.taxonomy)
+    return JsonResponse(data, json_dumps_params=_JSON)
+
+
+taxonomy_view.csrf_exempt = True
+
+
 # --- list / detail / delete -------------------------------------------------
 async def materials_list_view(request):
     if request.method != "GET":
@@ -30,7 +41,8 @@ async def materials_list_view(request):
     books = await asyncio.to_thread(
         materials.list_books,
         status=g.get("status") or None, subject=g.get("subject") or None,
-        language=g.get("language") or None, q=g.get("q") or None,
+        language=g.get("language") or None, school=g.get("school") or None,
+        grade=g.get("grade") or None, q=g.get("q") or None,
     )
     return JsonResponse(
         {"books": books, "ingest_in_progress": materials.ingest_in_progress()},
@@ -149,12 +161,15 @@ async def materials_upload_view(request):
     subject = (form.get("subject") or "").strip()
     title = (form.get("title") or "").strip()
     level = (form.get("level") or "brevet").strip()
+    school = (form.get("school") or "").strip() or None
+    grade = (form.get("grade") or "").strip() or None
     resolution = form.get("resolution") or None
     target_raw = form.get("target_id") or ""
     target_id = int(target_raw) if target_raw.isdigit() else None
 
-    if language not in ("en", "fr"):
-        return _err("'language' must be 'en' or 'fr'.")
+    valid_langs = await asyncio.to_thread(materials.valid_language_codes)
+    if language not in valid_langs:
+        return _err(f"'language' must be one of: {', '.join(sorted(valid_langs))}.")
     if not subject:
         return _err("'subject' is required.")
 
@@ -180,7 +195,8 @@ async def materials_upload_view(request):
         try:
             result = await asyncio.to_thread(
                 materials.run_upload, src_path=str(saved), language=language, subject_code=subject,
-                title=title, level=level, resolution=resolution, target_id=target_id, on_stage=on_stage,
+                title=title, level=level, school_code=school, grade_code=grade,
+                resolution=resolution, target_id=target_id, on_stage=on_stage,
             )
             await queue.put({"type": "done", **result})
         except materials.NeedsDecision as nd:

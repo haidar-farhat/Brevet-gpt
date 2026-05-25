@@ -6,6 +6,7 @@ from django.urls import path
 from apps.catalog import views
 
 urlpatterns = [
+    path("api/taxonomy", views.taxonomy_view, name="taxonomy"),
     path("api/materials", views.materials_list_view, name="materials_list"),
     path("api/materials/check", views.materials_check_view, name="materials_check"),
     path("api/materials/upload", views.materials_upload_view, name="materials_upload"),

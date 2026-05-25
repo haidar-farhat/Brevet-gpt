@@ -1,9 +1,11 @@
 import os
 import re
 import sys
+import json
 import shutil
 import time
 import argparse
+import unicodedata
 import urllib.request
 from statistics import median
 
@@ -35,7 +37,39 @@ RESULTS_FOLDER = os.path.join(BOOKS_FOLDER, "results")
 LANG_FOLDERS = {
     "english": ("eng", "eng", "en"),
     "french": ("fra", "fr", "fr"),
+    "arabic": ("ara", "ar", "ar"),
 }
+
+# Arabic / RTL script ranges. Lines containing these are right-aligned and Unicode-
+# normalised (NFKC) so the embedded *text layer* stays clean, logical Arabic — which
+# is what the RAG pipeline extracts and embeds. We deliberately do NOT reshape glyphs
+# into the PDF: reshaping would corrupt the extractable text the AI depends on.
+_RTL_RE = re.compile(r"[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]")
+
+
+def is_rtl(text):
+    return bool(_RTL_RE.search(text or ""))
+
+
+# Optional Arabic shaping for the *visual* PDF only (cursive joining + RTL order).
+# The embedded/searchable text comes from the logical OCR sidecar, NOT from re-
+# extracting this PDF, so shaping here can never corrupt what the RAG pipeline reads.
+try:
+    import arabic_reshaper as _arabic_reshaper
+    from bidi.algorithm import get_display as _get_display
+    _RTL_SHAPE = True
+except Exception:  # pragma: no cover - libs optional
+    _RTL_SHAPE = False
+
+
+def shape_rtl(text):
+    """Reshape + bidi-reorder Arabic for correct visual display in the rendered PDF."""
+    if _RTL_SHAPE:
+        try:
+            return _get_display(_arabic_reshaper.reshape(text))
+        except Exception:
+            return text
+    return text
 
 # Where we drop language packs we have to fetch ourselves (no admin rights
 # needed, unlike writing into the Tesseract install dir).
@@ -469,7 +503,15 @@ def render_pdf(pages, out_path, meta):
             else:
                 size, font, lead, gap = BODY_SIZE, FONT_NAME, BODY_LEAD, PARA_GAP
 
-            wrapped = wrap_text(p["text"], max_width, font, size)
+            # Arabic/RTL: NFKC-normalise (canonical, logical text -> clean extractable
+            # layer for the RAG pipeline) and right-align. Logical order is kept (no
+            # glyph reshaping) so PyMuPDF re-extracts proper Arabic for embedding.
+            text = p["text"]
+            rtl = is_rtl(text)
+            if rtl:
+                text = unicodedata.normalize("NFKC", text)
+
+            wrapped = wrap_text(text, max_width, font, size)
             if not wrapped:
                 continue
 
@@ -477,14 +519,17 @@ def render_pdf(pages, out_path, meta):
             if p["level"] and y - lead < MARGIN and y < page_h - MARGIN:
                 y = new_page()
             if p["level"]:
-                add_outline(p["text"], p["level"])
+                add_outline(text, p["level"])
 
             c.setFont(font, size)
             for ln in wrapped:
                 if y - lead < MARGIN:
                     y = new_page()
                     c.setFont(font, size)
-                c.drawString(MARGIN, y, ln)
+                if rtl:
+                    c.drawRightString(page_w - MARGIN, y, shape_rtl(ln))
+                else:
+                    c.drawString(MARGIN, y, ln)
                 y -= lead
             y -= gap
 
@@ -524,7 +569,8 @@ def process_pdf(pdf_path, lang, tessdata_arg, out_dir, iso, sample=0, start=0):
         printed = detect_printed_page(lines, img.shape[0])
         paras = build_paragraphs(lines, img.shape[0])
         label = f"p. {printed}" if printed is not None else f"p. {i + 1}*"
-        pages.append({"label": label, "paras": paras})
+        pages.append({"number": printed if printed is not None else (i + 1),
+                      "label": label, "paras": paras})
     doc.close()
 
     body_height = median(all_heights) if all_heights else 0
@@ -540,6 +586,19 @@ def process_pdf(pdf_path, lang, tessdata_arg, out_dir, iso, sample=0, start=0):
         "keywords": [iso, subject, "OCR", "scanned textbook"],
     }
     render_pdf(pages, out_path, meta)
+
+    # Logical-text sidecar: the RAG pipeline embeds THIS clean logical text, never the
+    # re-extracted PDF — a PDF reader's bidi mangles Arabic / mixed-RTL on extraction.
+    sidecar = os.path.splitext(out_path)[0] + ".ocr.json"
+    try:
+        with open(sidecar, "w", encoding="utf-8") as fh:
+            json.dump({"pages": [
+                {"number": pg.get("number"),
+                 "paras": [{"text": p.get("text", ""), "level": p.get("level", 0)} for p in pg["paras"]]}
+                for pg in pages
+            ]}, fh, ensure_ascii=False)
+    except Exception as e:  # pragma: no cover
+        print(f"  WARNING: could not write OCR sidecar: {e}")
 
     print(f"  saved: {out_path}")
     print(f"  pages: {hi - lo} | headings: {headings} | mean OCR conf: {mean_conf:.1f} | {time.time() - t0:.1f}s")

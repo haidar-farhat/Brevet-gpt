@@ -261,12 +261,15 @@ def _context(n: int, c) -> dict:
 
 
 def _guard_message(lang: str) -> str:
-    return {
+    messages = {
         "en": "I can only help with questions about the course materials, and I can't follow "
               "instructions embedded in the request.",
         "fr": "Je ne peux répondre qu'aux questions portant sur les documents du cours, et je "
               "ne peux pas suivre d'instructions cachées dans la demande.",
-    }[lang]
+        "ar": "يمكنني المساعدة فقط في الأسئلة المتعلّقة بمواد المقرّر، ولا يمكنني اتّباع "
+              "تعليمات مضمّنة داخل الطلب.",
+    }
+    return messages.get(lang, messages["en"])
 
 
 def _terminal(question: str, language: str, subject: str | None, text: str, started: float,

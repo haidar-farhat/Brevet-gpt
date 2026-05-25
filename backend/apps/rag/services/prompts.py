@@ -59,7 +59,7 @@ Subjects: math, physics, chemistry, biology, informatics, grammar, reading, fren
 
 Given a student question, respond with JSON ONLY:
 {
-  "language": "fr" or "en",
+  "language": "fr", "en", or "ar",
   "subject": one of the subjects above, or null if unsure,
   "search_queries": ["...", "..."]
 }
@@ -75,7 +75,7 @@ curriculum. Subjects: math, physics, chemistry, biology, informatics, grammar, r
 
 Analyse the student's message and respond with JSON ONLY:
 {
-  "language": "fr" or "en",
+  "language": "fr", "en", or "ar",
   "subject": one of the subjects above, or null if unclear,
   "in_scope": true if it is a learning question about these school subjects; false if it is \
 unrelated (small talk, coding requests, news, personal chat, etc.),
@@ -217,6 +217,7 @@ materials. Cite sources as [n]. Write in the same language as the question.\
 REFUSAL = {
     "en": "I don't have enough information in the materials to answer that.",
     "fr": "Je n'ai pas assez d'informations dans les documents pour répondre à cela.",
+    "ar": "لا تتوفّر لديّ معلومات كافية في المستندات للإجابة عن ذلك.",
 }
 
 OUT_OF_SCOPE = {
@@ -226,11 +227,15 @@ OUT_OF_SCOPE = {
     "fr": "Je suis ton tuteur pour le Brevet : je peux seulement t'aider sur les matières de 9e — "
           "maths, physique, chimie, biologie, informatique, français, anglais, grammaire et lecture. "
           "Pose-moi une question sur l'une d'elles et je chercherai dans les manuels !",
+    "ar": "أنا مساعدك للدراسة في صفّ التاسع (البريفيه): يمكنني المساعدة فقط في مواد المنهج — "
+          "الرياضيات والفيزياء والكيمياء والأحياء والمعلوماتية والفرنسية والإنجليزية والقواعد والمطالعة. "
+          "اطرح عليّ سؤالاً من هذه المواد وسأبحث لك في الكتب!",
 }
 
 CLARIFY_FALLBACK = {
     "en": "Could you give me a bit more detail about what you'd like to know?",
     "fr": "Peux-tu préciser un peu ce que tu aimerais savoir ?",
+    "ar": "هل يمكنك توضيح ما الذي تودّ معرفته بمزيد من التفصيل؟",
 }
 
 # Last-resort message so the answer is NEVER blank (used only if generation is
@@ -240,6 +245,8 @@ EMPTY_FALLBACK = {
           "about one part at a time — I'll dig back into the textbooks for you.",
     "fr": "Je n'ai pas réussi à formuler une réponse complète cette fois-ci. Reformule la question, "
           "ou pose-la-moi une partie à la fois — je rechercherai à nouveau dans les manuels.",
+    "ar": "لم أتمكّن من صياغة إجابة كاملة هذه المرة. أعد صياغة السؤال أو اسألني عن جزء واحد في كل مرة، "
+          "وسأبحث مجدّداً في الكتب.",
 }
 
 
@@ -256,6 +263,7 @@ def format_context(chunks) -> str:
 _LANGUAGE_DIRECTIVE = {
     "en": "Write your entire answer in English.",
     "fr": "Rédige toute ta réponse en français.",
+    "ar": "اكتب إجابتك كاملةً باللغة العربية.",
 }
 
 

@@ -51,7 +51,7 @@ export class App {
 
   // Inputs
   readonly question = signal('');
-  readonly language = signal<'auto' | 'en' | 'fr'>('auto');
+  readonly language = signal<'auto' | 'en' | 'fr' | 'ar'>('auto');
   readonly subject = signal('');
   readonly grade = signal('');                                   // '' = all grades
   readonly grades = signal<{ code: string; name: string }[]>([]);
@@ -193,7 +193,7 @@ export class App {
   setExample(ex: { q: string; language: string; subject: string }): void {
     if (this.busy()) return;
     this.question.set(ex.q);
-    this.language.set(ex.language as 'auto' | 'en' | 'fr');
+    this.language.set(ex.language as 'auto' | 'en' | 'fr' | 'ar');
     this.subject.set(ex.subject);
   }
 

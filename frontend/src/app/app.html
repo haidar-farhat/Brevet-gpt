@@ -31,6 +31,7 @@
         <button [class.on]="language()==='auto'" (click)="language.set('auto')" [disabled]="busy()">Auto</button>
         <button [class.on]="language()==='en'" (click)="language.set('en')" [disabled]="busy()">EN</button>
         <button [class.on]="language()==='fr'" (click)="language.set('fr')" [disabled]="busy()">FR</button>
+        <button [class.on]="language()==='ar'" (click)="language.set('ar')" [disabled]="busy()">AR</button>
       </div>
       <select class="subject" [ngModel]="subject()" (ngModelChange)="subject.set($event)" [disabled]="busy()">
         <option value="">Any subject</option>

@@ -8,6 +8,7 @@ output path ourselves.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -110,3 +111,20 @@ def page_count(pdf) -> int | None:
             return doc.page_count
     except Exception:  # pragma: no cover
         return None
+
+
+def read_ocr_sidecar(clean_pdf):
+    """Return the OCR logical-text sidecar written next to the clean PDF by
+    gpu_ocr_books — ``[{"number": int|None, "paras": [{"text": str, "level": int}]}]`` —
+    or None when absent (older output / non-OCR PDF). The ingest pipeline embeds THIS
+    clean logical text instead of re-extracting it from the rendered PDF, whose bidi-
+    reordered text layer corrupts Arabic / mixed-RTL content."""
+    p = Path(clean_pdf)
+    sidecar = p.parent / (p.stem + ".ocr.json")
+    if not sidecar.is_file():
+        return None
+    try:
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
+    except Exception:  # pragma: no cover
+        return None
+    return data.get("pages") or None

@@ -28,3 +28,9 @@ opencv-python-headless~=4.10
 pytesseract~=0.3
 reportlab~=4.2
 tqdm~=4.66
+
+# Arabic / RTL shaping for the OCR'd PDF's *visual* layer (cursive joining + bidi
+# order). The embedded/searchable text comes from the logical OCR sidecar, so these
+# affect only how the clean PDF looks — never what the RAG pipeline reads.
+arabic-reshaper~=3.0
+python-bidi~=0.6

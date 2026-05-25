@@ -47,7 +47,16 @@ class QueryAnalysis:
     sub_problems: list[str] = field(default_factory=list)  # self-contained parts to solve
 
 
+# Arabic script (incl. supplement + presentation forms) — detect 'ar' from the text.
+_AR_HINT = re.compile(r"[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]")
+
+# Languages the router/pipeline supports end to end (prompts, fallbacks, retrieval).
+SUPPORTED_LANGUAGES = ("en", "fr", "ar")
+
+
 def _guess_language(text: str) -> str:
+    if _AR_HINT.search(text or ""):
+        return "ar"
     return "fr" if _FR_HINT.search(text) else "en"
 
 
@@ -111,7 +120,7 @@ async def analyze_query(llm: LMStudioClient, question: str, language: str | None
         max_tokens=360,  # small JSON => reliable routing (decomposition is a separate call)
     )
     lang = language or data.get("language")
-    if lang not in ("en", "fr"):
+    if lang not in SUPPORTED_LANGUAGES:
         lang = _guess_language(question)
 
     subj = subject or data.get("subject")
@@ -156,7 +165,7 @@ async def plan_query(llm: LMStudioClient, question: str, language: str | None,
         max_tokens=300,
     )
     lang = language or data.get("language")
-    if lang not in ("en", "fr"):
+    if lang not in SUPPORTED_LANGUAGES:
         lang = _guess_language(question)
 
     subj = subject or data.get("subject")

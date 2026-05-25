@@ -60,7 +60,12 @@ def build_records_for_upload(*, src_path, language: str, on_stage=None) -> tuple
             emit("ocr", "scanned PDF — running OCR (this can take a few minutes)")
             clean = ocr_svc.ocr_to_clean_pdf(path, language)
             emit("chunk", "chunking the OCR'd text")
-            return chunk_pdf(clean, target, overlap), IntakeMeta(
+            # Embed the OCR logical-text sidecar (clean, correctly-ordered text — vital
+            # for Arabic/RTL); fall back to extracting the PDF only for older output.
+            pages = ocr_svc.read_ocr_sidecar(clean)
+            records = (_records_from_ocr_pages(pages, target, overlap) if pages
+                       else chunk_pdf(clean, target, overlap))
+            return records, IntakeMeta(
                 kind="scanned_pdf", total_pages=ocr_svc.page_count(clean), pdf_path=str(clean)
             )
         emit("parse", "extracting the PDF text layer")
@@ -103,6 +108,33 @@ def _heading_level(para) -> int | None:
     if name.lower() in ("title", "titre"):
         return 1
     return None
+
+
+def _records_from_ocr_pages(pages, target: int, overlap: int) -> list[ChunkRecord]:
+    """Build records from the OCR logical-text sidecar instead of re-extracting the
+    rendered PDF (whose reader-side bidi reorders/garbles Arabic & mixed-RTL text).
+    Mirrors the docx path: maintain a heading breadcrumb and emit text units per page,
+    using the real page numbers captured by the OCR step."""
+    stack: list[tuple[int, str]] = []  # (level, title) heading stack -> breadcrumb
+    units = []
+    for pg in pages:
+        try:
+            page_no = int(pg.get("number") or 1)
+        except (TypeError, ValueError):
+            page_no = 1
+        for p in pg.get("paras", []):
+            text = _WS.sub(" ", (p.get("text") or "")).strip()
+            if not text:
+                continue
+            level = int(p.get("level") or 0)
+            if level:
+                while stack and stack[-1][0] >= level:
+                    stack.pop()
+                stack.append((level, text))
+                continue  # heading line itself is not a content unit
+            crumb = " > ".join(t for _, t in stack)
+            units.extend(text_to_units(page_no, crumb, text))
+    return records_from_units(units, target, overlap)
 
 
 def _records_from_docx(path: Path, target: int, overlap: int) -> list[ChunkRecord]:

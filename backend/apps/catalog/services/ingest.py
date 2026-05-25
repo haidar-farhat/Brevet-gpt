@@ -44,8 +44,18 @@ def build_records(pdf_path) -> list[ChunkRecord]:
     return chunk_pdf(pdf_path, settings.EMBED_CHUNK_TOKENS, settings.EMBED_CHUNK_OVERLAP)
 
 
-def ingest_book(*, book: Book, pdf_path, embedder, collection, dry_run: bool = False) -> IngestResult:
-    records = build_records(pdf_path)
+def document_hash(records: list[ChunkRecord]) -> str:
+    """Stable SHA-256 over a document's chunk texts — the book-level dedup key.
+    Used at ingest and to backfill existing books so a re-upload hashes identically."""
+    joined = "\n".join(r.text for r in records)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
+def ingest_book(*, book: Book, records: list[ChunkRecord], embedder, collection,
+                dry_run: bool = False) -> IngestResult:
+    """Embed pre-built ``records`` and replace the book's chunks/vectors. Callers
+    build records via ``build_records(pdf)`` (clean OCR'd PDF) or the upload intake
+    service (docx / native PDF)."""
     total_tokens = sum(r.token_count for r in records)
     sample = records[len(records) // 2] if records else None
 

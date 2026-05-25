@@ -5,6 +5,9 @@
 chromadb~=1.0
 tiktoken~=0.8
 
+# Word (.docx) text extraction for the Manage Materials upload (no OCR needed).
+python-docx~=1.1
+
 # Local CPU embeddings (default backend). Pulls a CPU-only torch.
 sentence-transformers>=3.0,<6
 # Pin transformers to the stable 4.x line: 5.x (e.g. 5.9.0) segfaults on Windows

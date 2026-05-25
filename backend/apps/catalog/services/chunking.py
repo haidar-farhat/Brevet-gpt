@@ -111,18 +111,10 @@ def _windows(units: list[_Unit], target: int, overlap: int) -> list[list[_Unit]]
     return out
 
 
-def chunk_pdf(pdf_path: str | Path, target_tokens: int, overlap_tokens: int) -> list[ChunkRecord]:
-    with fitz.open(pdf_path) as doc:
-        n_pages = doc.page_count
-        crumbs = _breadcrumbs_per_page(doc.get_toc(), n_pages)
-        units: list[_Unit] = []
-        for page in range(1, n_pages + 1):
-            text = _clean_page_text(doc.load_page(page - 1).get_text("text"))
-            if not text:
-                continue
-            crumb = crumbs[page]
-            units.extend(_Unit(page, crumb, seg, count_tokens(seg)) for seg in _segments(text))
-
+def records_from_units(units: list[_Unit], target_tokens: int, overlap_tokens: int) -> list[ChunkRecord]:
+    """Group units by section breadcrumb, window each section to the token budget,
+    and emit ChunkRecords. Shared by ``chunk_pdf`` (scanned/native PDF) and the
+    docx intake path so every input chunks identically."""
     records: list[ChunkRecord] = []
     index = 0
     for crumb, group in groupby(units, key=lambda u: u.crumb):
@@ -140,3 +132,23 @@ def chunk_pdf(pdf_path: str | Path, target_tokens: int, overlap_tokens: int) -> 
             )
             index += 1
     return records
+
+
+def text_to_units(page: int, crumb: str, text: str) -> list[_Unit]:
+    """Sentence-segment a text block into units (for non-PDF intake, e.g. docx)."""
+    return [_Unit(page, crumb, seg, count_tokens(seg)) for seg in _segments(text)]
+
+
+def chunk_pdf(pdf_path: str | Path, target_tokens: int, overlap_tokens: int) -> list[ChunkRecord]:
+    with fitz.open(pdf_path) as doc:
+        n_pages = doc.page_count
+        crumbs = _breadcrumbs_per_page(doc.get_toc(), n_pages)
+        units: list[_Unit] = []
+        for page in range(1, n_pages + 1):
+            text = _clean_page_text(doc.load_page(page - 1).get_text("text"))
+            if not text:
+                continue
+            crumb = crumbs[page]
+            units.extend(text_to_units(page, crumb, text))
+
+    return records_from_units(units, target_tokens, overlap_tokens)

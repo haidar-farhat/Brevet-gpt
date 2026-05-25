@@ -13,7 +13,7 @@ from __future__ import annotations
 from django.core.validators import MinValueValidator
 from django.db import models
 
-from apps.catalog.enums import Language, SubjectCode
+from apps.catalog.enums import BookStatus, Language, SubjectCode
 
 
 class TimeStampedModel(models.Model):
@@ -75,6 +75,28 @@ class Book(TimeStampedModel):
     )
     processed_at = models.DateTimeField(null=True, blank=True)
 
+    status = models.CharField(
+        max_length=8,
+        choices=BookStatus.choices,
+        default=BookStatus.ACTIVE,
+        db_index=True,
+        help_text="Frozen books are kept (reversible) but excluded from retrieval.",
+    )
+    content_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        db_index=True,
+        help_text="SHA-256 of the normalised document text; for upload dedup detection.",
+    )
+    replaces = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="replaced_by",
+        help_text="The (now frozen) book this one superseded via freeze-and-replace.",
+    )
+
     class Meta:
         db_table = "books"
         ordering = ("language", "title")
@@ -86,6 +108,7 @@ class Book(TimeStampedModel):
         ]
         indexes = [
             models.Index(fields=("language", "subject"), name="ix_book_routing"),
+            models.Index(fields=("status", "language", "subject"), name="ix_book_status_routing"),
         ]
 
     def __str__(self) -> str:

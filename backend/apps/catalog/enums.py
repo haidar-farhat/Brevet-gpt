@@ -11,6 +11,14 @@ class Language(models.TextChoices):
     FRENCH = "fr", "French"
 
 
+class BookStatus(models.TextChoices):
+    """Lifecycle of a book in the corpus. Frozen books are kept (and the state is
+    reversible) but excluded from retrieval."""
+
+    ACTIVE = "active", "Active"
+    FROZEN = "frozen", "Frozen"
+
+
 class SubjectCode(models.TextChoices):
     """Stable machine codes for the subject taxonomy (routing targets)."""
 

@@ -11,7 +11,8 @@ from dataclasses import dataclass
 
 from django.db import connection
 
-from apps.catalog.models import Chunk
+from apps.catalog.enums import BookStatus
+from apps.catalog.models import Book, Chunk
 
 RRF_K = 60
 
@@ -44,12 +45,19 @@ class HybridRetriever:
         self.collection = collection
 
     @staticmethod
-    def _where(language: str | None, subject: str | None):
+    def _frozen_book_ids() -> list[int]:
+        """Books excluded from retrieval (soft-disabled, kept in both stores)."""
+        return list(Book.objects.filter(status=BookStatus.FROZEN).values_list("id", flat=True))
+
+    @staticmethod
+    def _where(language: str | None, subject: str | None, exclude_book_ids=None):
         conds = []
         if language:
             conds.append({"language": language})
         if subject:
             conds.append({"subject": subject})
+        if exclude_book_ids:
+            conds.append({"book_id": {"$nin": list(exclude_book_ids)}})  # drop frozen books
         if not conds:
             return None
         return conds[0] if len(conds) == 1 else {"$and": conds}
@@ -63,7 +71,7 @@ class HybridRetriever:
         dists = (res.get("distances") or [[]])[0]
         return [(_uid(i), 1.0 - float(d)) for i, d in zip(ids, dists)]
 
-    def _lexical(self, query: str, language, subject, k: int) -> list[tuple[uuid.UUID, float]]:
+    def _lexical(self, query: str, language, subject, k: int, exclude_book_ids=None) -> list[tuple[uuid.UUID, float]]:
         sql = [
             "SELECT vector_id, MATCH(content) AGAINST(%s IN NATURAL LANGUAGE MODE) AS score",
             "FROM chunks",
@@ -76,6 +84,9 @@ class HybridRetriever:
         if subject:
             sql.append("AND subject_id = (SELECT id FROM subjects WHERE code = %s)")
             params.append(subject)
+        if exclude_book_ids:
+            sql.append(f"AND book_id NOT IN ({', '.join(['%s'] * len(exclude_book_ids))})")  # drop frozen
+            params.extend(exclude_book_ids)
         sql.append("ORDER BY score DESC LIMIT %s")
         params.append(k)
         with connection.cursor() as cursor:
@@ -88,7 +99,10 @@ class HybridRetriever:
         """Dense + lexical retrieval fused by RRF, hydrated into RetrievedChunks
         in fused order (NOT yet truncated to a token budget). Returns (candidates,
         best_dense_sim)."""
-        where = self._where(language, subject)
+        # Exclude frozen (soft-disabled) books at every layer so their chunks never
+        # consume candidate slots, taint RRF, or reach the answer.
+        frozen = self._frozen_book_ids()
+        where = self._where(language, subject, frozen)
         dense_sim: dict[uuid.UUID, float] = {}
         rank_lists: list[list[uuid.UUID]] = []
 
@@ -97,7 +111,7 @@ class HybridRetriever:
             for uid, sim in dense_hits:
                 dense_sim[uid] = max(dense_sim.get(uid, -1.0), sim)
             rank_lists.append([uid for uid, _ in dense_hits])
-            rank_lists.append([uid for uid, _ in self._lexical(query, language, subject, candidates)])
+            rank_lists.append([uid for uid, _ in self._lexical(query, language, subject, candidates, frozen)])
 
         fused = _rrf(rank_lists)
         if not fused:
@@ -106,7 +120,9 @@ class HybridRetriever:
         rrf_score = dict(fused)
         chunks = {
             _uid(c.vector_id): c
-            for c in Chunk.objects.filter(vector_id__in=[uid for uid, _ in fused]).select_related("book", "subject")
+            for c in Chunk.objects.filter(
+                vector_id__in=[uid for uid, _ in fused], book__status=BookStatus.ACTIVE
+            ).select_related("book", "subject")
         }
 
         result: list[RetrievedChunk] = []

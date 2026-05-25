@@ -26,7 +26,12 @@ _INJECTION = re.compile(
         jailbreak |
         ignore\s+(les\s+|toutes\s+les\s+)?instructions |
         oublie\s+(tout|les\s+instructions) |
-        révèle\s+(le\s+)?prompt
+        révèle\s+(le\s+)?prompt |
+        تجاهل\s+(جميع\s+|كل\s+|كلّ\s+)?(الأوامر|التعليمات) |
+        (انس|انسى|انسَ)\s+(كل\s+|جميع\s+)?(ما\s+سبق|التعليمات) |
+        (اكشف|أظهر|اعرض)\s+(عن\s+)?(ال)?(prompt|البرومبت|التعليمات|نظامك) |
+        (تظاهر|تصرّف|تصرف)\s+(أنك|بأنك|كأنك) |
+        وضع\s+المطور
     )""",
     re.IGNORECASE | re.VERBOSE,
 )

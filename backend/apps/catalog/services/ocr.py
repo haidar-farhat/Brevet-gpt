@@ -82,8 +82,14 @@ def ocr_to_clean_pdf(input_path: Path, language: str) -> Path:
     ocr = load_ocr_module()
     tess_lang, out_subdir, iso = m[language]
     out = Path(ocr.RESULTS_FOLDER) / out_subdir / f"{Path(input_path).stem}.pdf"
-    if out.is_file():
-        return out  # already OCR'd — skip the work
+    sidecar = out.parent / (out.stem + ".ocr.json")
+    # Only reuse a prior run when BOTH the clean PDF and its logical-text sidecar
+    # exist. A PDF without a sidecar is stale (pre-sidecar output): re-OCR so the
+    # sidecar is (re)generated, otherwise intake silently falls back to PyMuPDF
+    # extraction — which bidi-corrupts Arabic.
+    if out.is_file() and sidecar.is_file():
+        return out
+    out.unlink(missing_ok=True)  # drop a stale PDF so the re-OCR rewrites it cleanly
     tessdata_arg, available = ocr.ensure_languages({tess_lang})
     if tess_lang not in available or "osd" not in available:
         raise OCRError(f"Tesseract language '{tess_lang}' is unavailable; cannot OCR.")

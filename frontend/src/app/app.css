@@ -105,6 +105,13 @@ textarea::placeholder { color: var(--muted); }
 .rich th, .rich td { border: 1px solid var(--border); padding: 4px 8px; }
 .rich .katex { font-size: 1.05em; }
 .rich .katex-display { margin: 0.6em 0; overflow-x: auto; overflow-y: hidden; }
+
+/* RTL / bidi: dir="auto" on these blocks picks direction from the text; plaintext
+   directs each line independently so Arabic flows right-to-left while embedded
+   numbers/Latin stay left-to-right. text-align:start follows the resolved direction. */
+.answer-body pre, .reasoning pre, .src-body pre { unicode-bidi: plaintext; }
+.rich[dir] { text-align: start; }
+
 .caret { color: var(--accent); animation: blink 1s step-end infinite; }
 .caret.hidden { display: none; }
 @keyframes blink { 50% { opacity: 0; } }

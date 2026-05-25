@@ -134,7 +134,7 @@
       @for (c of d.chunks; track c.chunk_index) {
         <div class="chunk">
           <div class="meta">#{{ c.chunk_index }} · p.{{ c.page_start }}@if (c.page_end !== c.page_start) {-{{ c.page_end }}}@if (c.heading_path) { — {{ c.heading_path }}}</div>
-          <pre>{{ c.content }}</pre>
+          <pre dir="auto">{{ c.content }}</pre>
         </div>
       }
       @if (d.chunk_count > d.chunks.length) { <div class="muted">showing the first {{ d.chunks.length }} of {{ d.chunk_count }} chunks.</div> }
@@ -153,7 +153,7 @@
       @for (h of hits; track $index) {
         <div class="hit">
           <div class="meta">{{ h.book }} · {{ subjectName(h.subject) }} · p.{{ h.page_start }}@if (h.heading) { — {{ h.heading }}} <span class="sim">sim {{ h.sim }}</span></div>
-          <div class="snip">{{ h.snippet }}</div>
+          <div class="snip" dir="auto">{{ h.snippet }}</div>
         </div>
       }
     }

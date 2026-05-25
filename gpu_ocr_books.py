@@ -89,6 +89,19 @@ def _variant_for(lang):
 def _local_traineddata(lang):
     return os.path.join(LOCAL_TESSDATA, f"{lang}.traineddata")
 
+
+def _variant_marker(lang):
+    """Empty marker tagging which variant the local <lang>.traineddata came from, so
+    a stale fast copy is replaced when a 'best' variant is required (size/name alone
+    can't distinguish variants)."""
+    return os.path.join(LOCAL_TESSDATA, f"{lang}.{_variant_for(lang)}")
+
+
+def _has_desired_variant(lang):
+    """Local traineddata present AND (for pinned langs) tagged with the wanted variant."""
+    return os.path.isfile(_local_traineddata(lang)) and (
+        lang not in TESSDATA_VARIANT_BY_LANG or os.path.isfile(_variant_marker(lang)))
+
 # Render quality. NOTE: the previous version did `min(DPI/72, 2.0)`, which
 # silently capped every page at ~144 DPI. Tesseract wants ~300 DPI, so we now
 # render at the real DPI and only fall back if a page would exceed MAX_SIDE.
@@ -209,9 +222,12 @@ def ensure_languages(needed):
         installed = set()
 
     # Languages pinned to a specific variant (Arabic -> best): never accept a
-    # system/fast copy — require a local best copy, downloading it if missing.
-    force = {l for l in needed if l in TESSDATA_VARIANT_BY_LANG and not os.path.isfile(_local_traineddata(l))}
+    # system/fast copy — require a local copy tagged with the desired variant.
+    force = {l for l in needed if l in TESSDATA_VARIANT_BY_LANG and not _has_desired_variant(l)}
     if needed <= installed and not force:
+        # Everything is in the system tessdata; clear any LOCAL override left by an
+        # earlier call (e.g. an Arabic upload) so this language uses the system data.
+        os.environ.pop("TESSDATA_PREFIX", None)
         return "", installed
 
     print(f"\nPreparing {LOCAL_TESSDATA} (missing {sorted(needed - installed)}; best: {sorted(force)})")
@@ -221,7 +237,9 @@ def ensure_languages(needed):
 
     for lang in sorted(needed):
         dest = _local_traineddata(lang)
-        if os.path.isfile(dest):
+        # Reuse only if present AND (for pinned langs) tagged with the desired variant;
+        # a stale fast copy of a pinned lang is re-downloaded as 'best'.
+        if _has_desired_variant(lang) if lang in TESSDATA_VARIANT_BY_LANG else os.path.isfile(dest):
             available.add(lang)
             continue
         # Forced-variant langs skip the install copy and download the right variant.
@@ -234,6 +252,8 @@ def ensure_languages(needed):
             continue
         try:
             _download_traineddata(lang, dest)
+            if lang in TESSDATA_VARIANT_BY_LANG:
+                open(_variant_marker(lang), "w").close()  # tag the variant we fetched
             available.add(lang)
         except RuntimeError as e:
             print(f"  WARNING: {e}")
@@ -415,6 +435,23 @@ def build_paragraphs(lines, page_h):
         })
     return paras
 
+def ocr_page_text(img, lang, tessdata_arg):
+    """Tesseract's canonical text for a page — respects RTL reading order. Used for
+    Arabic, where reconstructing paragraphs from LTR word boxes is unreliable."""
+    cfg = f"{TESSERACT_CONFIG} {tessdata_arg}".strip()
+    return pytesseract.image_to_string(img, lang=lang, config=cfg)
+
+def paras_from_text(text):
+    """Split canonical OCR text into paragraph dicts (blank-line separated). Carries
+    the keys classify_headings inspects, set so these paras are kept as body text."""
+    paras = []
+    for block in re.split(r"\n\s*\n", text or ""):
+        t = re.sub(r"\s+", " ", block).strip()
+        if t:
+            paras.append({"text": t, "level": 0, "in_margin": False,
+                          "words": len(t.split()), "conf": 0.0, "height": 0.0, "top": 0})
+    return paras
+
 def looks_like_heading(text):
     """Reject body fragments, equations and list items that happen to be large.
 
@@ -590,7 +627,12 @@ def process_pdf(pdf_path, lang, tessdata_arg, out_dir, iso, sample=0, start=0):
         all_heights.extend(ln["height"] for ln in lines)
         confs.extend(ln["conf"] for ln in lines)
         printed = detect_printed_page(lines, img.shape[0])
-        paras = build_paragraphs(lines, img.shape[0])
+        if lang == "ara":
+            # Arabic: word-box reconstruction reverses/garbles RTL — use Tesseract's
+            # canonical reading-order text for both the embedded sidecar and the render.
+            paras = paras_from_text(ocr_page_text(img, lang, tessdata_arg))
+        else:
+            paras = build_paragraphs(lines, img.shape[0])
         label = f"p. {printed}" if printed is not None else f"p. {i + 1}*"
         pages.append({"number": printed if printed is not None else (i + 1),
                       "label": label, "paras": paras})

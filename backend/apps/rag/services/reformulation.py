@@ -22,7 +22,11 @@ _PROBLEM_VERB = re.compile(
     r"\b(solv|calcul|comput|evaluat|factor|expand|simplif|prov|determin|deduc|deriv|"
     r"construct|find\s+(the|x|y|all|its|value)|show\s+that|"
     r"résou|resou|factoris|développ|developp|démontr|demontr|déduir|deduir|détermin|"
-    r"construir|vérifi|verifi)", re.IGNORECASE)
+    r"construir|vérifi|verifi)"
+    # Arabic solve-verbs (anchored at word start to limit false positives):
+    r"|(?:(?<=\s)|^)(?:احسب|أحسب|احسبي|اوجد|أوجد|أوجدي|جد|حلّ|حل|اثبت|أثبت|برهن|بسّط|بسط|"
+    r"بسّطي|عيّن|عين|حدّد|حدد|اشتقّ|اشتق|استنتج|بيّن|بيّني|ارسم|انشر|فكّك|فكك|حلّل|حلل|"
+    r"تحقّق|تحقق|علّل|قارن)", re.IGNORECASE)
 # Numbered / lettered parts: "1)", "2.", "a)", "Part 3", "Partie 2", "ii)".
 _PART_MARKER = re.compile(r"(^|\s)(\d{1,2}[).]|[a-f][).]|i{1,3}[).]|partie?\s*\d)", re.IGNORECASE)
 _EXPRESSION = re.compile(r"=|\b[A-Za-z]\s*\(\s*[a-z]\s*\)")  # an equation or f(x)-style expression

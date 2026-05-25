@@ -63,5 +63,5 @@ button:disabled, input:disabled, select:disabled { opacity: 0.55; cursor: not-al
 .chunk:last-child, .hit:last-child { border-bottom: none; }
 .meta { color: var(--dim); font-size: 12.5px; }
 .sim { color: var(--muted); }
-.chunk pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; font-family: "Cascadia Code","JetBrains Mono",Consolas,monospace; font-size: 12.5px; line-height: 1.5; color: var(--dim); background: #0a0d12; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; max-height: 220px; overflow-y: auto; }
-.snip { color: var(--fg); font-size: 13.5px; margin-top: 3px; }
+.chunk pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; unicode-bidi: plaintext; font-family: "Cascadia Code","JetBrains Mono",Consolas,monospace; font-size: 12.5px; line-height: 1.5; color: var(--dim); background: #0a0d12; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; max-height: 220px; overflow-y: auto; }
+.snip { color: var(--fg); font-size: 13.5px; margin-top: 3px; unicode-bidi: plaintext; }

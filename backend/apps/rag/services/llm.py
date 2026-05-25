@@ -84,13 +84,15 @@ class LMStudioClient:
         # chat_json. This keeps the client portable across local backends.
         client = self._client_or_init()
         model = await self.model()
-        mt = settings.LLM_MAX_TOKENS if max_tokens is None else max_tokens
-        mt = max(mt, getattr(settings, "LLM_MIN_COMPLETION_TOKENS", 0))  # headroom for hidden reasoning
+        # NB: no reasoning-headroom floor here. This (non-streaming) path is used for
+        # the small JSON calls (route/decompose/grade); flooring them high makes a
+        # reasoning model "think" up to the cap in one blocking request -> timeout.
+        # The floor is applied only on the streaming answer path (chat_stream).
         kwargs: dict = {
             "model": model,
             "messages": messages,
             "temperature": settings.LLM_TEMPERATURE if temperature is None else temperature,
-            "max_tokens": mt,
+            "max_tokens": settings.LLM_MAX_TOKENS if max_tokens is None else max_tokens,
             **_think_kwargs(),
         }
         started = time.perf_counter()

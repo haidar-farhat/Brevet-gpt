@@ -42,7 +42,9 @@ export class BrevetService {
         signal,
       });
     } catch (e: any) {
-      handlers.onError?.(`Cannot reach API at ${this.base}. Is the server running? (${e?.message ?? e})`);
+      if (e?.name !== 'AbortError') {
+        handlers.onError?.(`Cannot reach API at ${this.base}. Is the server running? (${e?.message ?? e})`);
+      }
       handlers.onDone?.();
       return;
     }
@@ -75,7 +77,7 @@ export class BrevetService {
         }
       }
     } catch (e: any) {
-      handlers.onError?.(`Stream interrupted: ${e?.message ?? e}`);
+      if (e?.name !== 'AbortError') handlers.onError?.(`Stream interrupted: ${e?.message ?? e}`);
     } finally {
       handlers.onDone?.();
     }

@@ -1,13 +1,20 @@
 <div class="app">
   <header>
-    <div class="brand">Brevet-GPT <span class="sub">study assistant</span></div>
-    @if (busy()) {
-      <div class="status busy"><span class="dot"></span>{{ stageLabel() }}…</div>
-    } @else {
-      <div class="status">ready</div>
+    <div class="brand">Brevet-GPT</div>
+    <nav class="tabs">
+      <button [class.on]="view()==='study'" (click)="view.set('study')">Study Assistant</button>
+      <button [class.on]="view()==='manage'" (click)="view.set('manage')">Manage Materials</button>
+    </nav>
+    @if (view()==='study') {
+      @if (busy()) {
+        <div class="status busy"><span class="dot"></span>{{ stageLabel() }}…</div>
+      } @else {
+        <div class="status">ready</div>
+      }
     }
   </header>
 
+  @if (view() === 'study') {
   <!-- Ask -->
   <section class="ask">
     <textarea
@@ -30,6 +37,7 @@
         @for (s of subjects; track s) { <option [value]="s">{{ s }}</option> }
       </select>
       <button class="ask-btn" (click)="ask()" [disabled]="busy()">{{ busy() ? 'Working…' : 'Ask ▷' }}</button>
+      @if (busy()) { <button class="stop-btn" (click)="stop()" title="Stop the current query">■ Stop</button> }
     </div>
 
     @if (!hasRun()) {
@@ -151,5 +159,8 @@
         }
       </section>
     }
+  }
+  } @else {
+    <app-manage />
   }
 </div>

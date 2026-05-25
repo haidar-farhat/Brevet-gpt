@@ -24,7 +24,10 @@ from reportlab.pdfbase.ttfonts import TTFont
 # CONFIG
 # =========================
 
-BOOKS_FOLDER = r"C:\Users\Admin\Documents\books"
+# Derive from this file's own location (the repo root) so paths are portable
+# across machines instead of being pinned to one user's disk. The Django wrapper
+# (apps/catalog/services/ocr.py) further overrides RESULTS_FOLDER to settings.RESULTS_DIR.
+BOOKS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 RESULTS_FOLDER = os.path.join(BOOKS_FOLDER, "results")
 
 # Each input subfolder maps to: (tesseract lang, results subdir, ISO 639-1 code).

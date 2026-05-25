@@ -20,3 +20,12 @@ backend/staticfiles/
 # Vector store (persistent ChromaDB)
 /chroma/
 
+# Uploaded materials + their OCR output (user content, not version controlled)
+/uploads/
+
+# OCR output (clean structured PDFs produced from scanned sources)
+/results/
+
+# Tesseract language packs downloaded by gpu_ocr_books.py (cache)
+/tessdata/
+

@@ -56,6 +56,11 @@ def load_ocr_module():
         import gpu_ocr_books  # noqa: PLC0415
     except Exception as exc:  # pragma: no cover
         raise OCRError(f"Could not import gpu_ocr_books from {root}: {exc}") from exc
+    # Redirect OCR output into the project's results dir. The standalone module hard-
+    # codes its own external ``BOOKS_FOLDER/results`` (e.g. C:\Users\...\Documents\
+    # books\results); point it at ``settings.RESULTS_DIR`` so OCR'd PDFs live inside
+    # the project (alongside assets/), consistent with where uploads are now stored.
+    gpu_ocr_books.RESULTS_FOLDER = str(settings.RESULTS_DIR)
     return gpu_ocr_books
 
 
@@ -81,6 +86,10 @@ def ocr_to_clean_pdf(input_path: Path, language: str) -> Path:
     tessdata_arg, available = ocr.ensure_languages({tess_lang})
     if tess_lang not in available or "osd" not in available:
         raise OCRError(f"Tesseract language '{tess_lang}' is unavailable; cannot OCR.")
+    # process_pdf writes straight to this path but does NOT create the folder (only
+    # gpu_ocr_books' batch path does). For a newly-added language subdir (e.g. 'ar')
+    # it won't exist yet, so create it here or the canvas write FileNotFoundErrors.
+    out.parent.mkdir(parents=True, exist_ok=True)
     ocr.process_pdf(str(input_path), tess_lang, tessdata_arg, out_subdir, iso)
     if not out.is_file():
         raise OCRError(f"Expected OCR output not found: {out}")

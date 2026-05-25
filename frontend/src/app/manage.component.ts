@@ -9,8 +9,6 @@ interface UpLog {
   text: string;
 }
 
-const SUBJECTS = ['math', 'physics', 'chemistry', 'biology', 'informatics', 'grammar', 'reading', 'french', 'english'];
-
 const UP_STAGE: Record<string, string> = {
   validate: 'Validating',
   parse: 'Extracting text',
@@ -28,9 +26,8 @@ const UP_STAGE: Record<string, string> = {
   styleUrl: './manage.component.css',
 })
 export class ManageComponent {
-  readonly subjects = SUBJECTS;
-
   // Routing vocabularies (from /api/taxonomy)
+  readonly subjects = signal<{ code: string; name_en: string; name_fr: string }[]>([]);
   readonly languages = signal<{ code: string; name: string; native_name: string }[]>([]);
   readonly schools = signal<{ code: string; name: string }[]>([]);
   readonly grades = signal<{ code: string; name: string; ordinal: number }[]>([]);
@@ -81,16 +78,47 @@ export class ManageComponent {
   private async loadTaxonomy(): Promise<void> {
     try {
       const t = await this.api.taxonomy();
+      this.subjects.set(t.subjects);
       this.languages.set(t.languages);
       this.schools.set(t.schools);
       this.grades.set(t.grades);
       if (t.languages.length && !t.languages.some((l) => l.code === this.upLang())) {
         this.upLang.set(t.languages[0].code);
       }
-      if (t.schools.length) this.upSchool.set(t.schools[0].code);
+      if (t.schools.length && !t.schools.some((s) => s.code === this.upSchool())) {
+        this.upSchool.set(t.schools[0].code);
+      }
     } catch {
       /* taxonomy unavailable — dropdowns fall back to empty */
     }
+  }
+
+  /** "Add new" for a routing dimension: prompt for a name, create it server-side,
+   *  refresh the vocabularies, and select the new term in the upload form. */
+  async addTerm(kind: 'language' | 'subject' | 'school' | 'grade'): Promise<void> {
+    const name = (window.prompt(`New ${kind} name:`) || '').trim();
+    if (!name) return;
+    try {
+      const { term } = await this.api.createTerm(kind, name);
+      await this.loadTaxonomy();
+      const code = term.code as string;
+      if (kind === 'subject') this.upSubject.set(code);
+      else if (kind === 'school') this.upSchool.set(code);
+      else if (kind === 'grade') this.upGrade.set(code);
+      else if (kind === 'language') this.upLang.set(code);
+    } catch (e: any) {
+      alert(`Could not add ${kind}: ${e?.message ?? e}`);
+    }
+  }
+
+  /** Display name for a subject option (falls back to its code). */
+  subjectLabel(s: { code: string; name_en: string; name_fr: string }): string {
+    return s.name_en || s.code;
+  }
+
+  /** Display name for a subject by code, for list/detail rows (falls back to code). */
+  subjectName(code: string): string {
+    return this.subjects().find((s) => s.code === code)?.name_en || code;
   }
 
   // ---------------- library ----------------

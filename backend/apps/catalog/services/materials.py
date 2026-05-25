@@ -15,7 +15,10 @@ import uuid
 from pathlib import Path
 
 from django.conf import settings
+from django.db import IntegrityError, transaction
+from django.db.models import Max, Q
 from django.utils import timezone
+from django.utils.text import slugify
 
 from apps.catalog.data import taxonomy
 from apps.catalog.enums import BookStatus
@@ -93,8 +96,10 @@ def valid_language_codes() -> set[str]:
 
 
 def save_upload(language: str, filename: str, chunks) -> Path:
-    """Stream the uploaded file to UPLOADS_DIR/{lang}/ and return its path."""
-    folder = Path(settings.UPLOADS_DIR) / _lang_folder(language)
+    """Stream the uploaded file into the corpus source tree, ASSETS_DIR/{lang}/, so it
+    sits alongside the seeded books (Book.source_file is relative to ASSETS_DIR). OCR
+    then writes the clean PDF separately under the results folder."""
+    folder = Path(settings.ASSETS_DIR) / _lang_folder(language)
     folder.mkdir(parents=True, exist_ok=True)
     dest = folder / sanitize_filename(filename)
     with open(dest, "wb") as fh:
@@ -152,6 +157,87 @@ def taxonomy() -> dict:
             for s in Subject.objects.all()
         ],
     }
+
+
+_TAX_KINDS = {"language", "subject", "school", "grade"}
+_MAX_TERM_NAME = 64
+
+
+def _term_subject(o: Subject) -> dict:
+    return {"code": o.code, "name_en": o.name_en, "name_fr": o.name_fr}
+
+
+def _term_school(o: School) -> dict:
+    return {"code": o.code, "name": o.name}
+
+
+def _term_grade(o: Grade) -> dict:
+    return {"code": o.code, "name": o.name, "ordinal": o.ordinal}
+
+
+def _term_language(o: Language) -> dict:
+    return {"code": o.code, "name": o.name, "native_name": o.native_name}
+
+
+def _unique_code(model, name: str, *, maxlen: int) -> str:
+    """A length-capped slug of ``name``, made unique within ``model.code``.
+    Both ``code`` and the human ``name`` are UNIQUE on these models, so we must never
+    reuse an existing code for a different row — append -2, -3, … if taken.
+    ``allow_unicode`` keeps non-Latin names (e.g. Arabic 'المدنية') from collapsing to
+    an empty code; falls back to the kind/sequence only for symbol-only names."""
+    base = (slugify(name, allow_unicode=True) or slugify(name))[:maxlen].strip("-")
+    if not base:
+        raise UploadError("Could not derive a code from that name — use letters or digits.")
+    code, i = base, 2
+    while model.objects.filter(code=code).exists():
+        suffix = f"-{i}"
+        code = (base[: maxlen - len(suffix)].strip("-")) + suffix
+        i += 1
+    return code
+
+
+def create_taxonomy_term(kind: str, name: str) -> dict:
+    """Create (or reuse) a routing term from a human name. Idempotent on the name
+    (case-insensitive): 'add Grade 9' returns the existing Grade 9 instead of crashing
+    on its UNIQUE name. The code is a unique, length-capped slug; a new language's OCR
+    (tesseract) is left blank — set it in the admin to OCR scanned PDFs in it."""
+    kind = (kind or "").strip().lower()
+    name = " ".join((name or "").split())[:_MAX_TERM_NAME]  # collapse whitespace, cap
+    if kind not in _TAX_KINDS:
+        raise UploadError(f"Unknown taxonomy type '{kind}'.")
+    if not name:
+        raise UploadError("A name is required.")
+    try:
+        with transaction.atomic():
+            if kind == "subject":
+                hit = Subject.objects.filter(Q(name_en__iexact=name) | Q(name_fr__iexact=name)).first()
+                if hit:
+                    return _term_subject(hit)
+                code = _unique_code(Subject, name, maxlen=32)
+                return _term_subject(Subject.objects.create(code=code, name_en=name, name_fr=name, aliases=[]))
+            if kind == "school":
+                hit = School.objects.filter(name__iexact=name).first()
+                if hit:
+                    return _term_school(hit)
+                code = _unique_code(School, name, maxlen=64)
+                return _term_school(School.objects.create(code=code, name=name, enabled=True))
+            if kind == "grade":
+                hit = Grade.objects.filter(name__iexact=name).first()
+                if hit:
+                    return _term_grade(hit)
+                code = _unique_code(Grade, name, maxlen=32)
+                nxt = (Grade.objects.aggregate(m=Max("ordinal"))["m"] or 0) + 1
+                return _term_grade(Grade.objects.create(code=code, name=name, ordinal=nxt, enabled=True))
+            # language
+            hit = Language.objects.filter(name__iexact=name).first()
+            if hit:
+                return _term_language(hit)
+            code = _unique_code(Language, name, maxlen=8)
+            return _term_language(Language.objects.create(
+                code=code, name=name, native_name=name, tesseract="",
+                ocr_subdir=code, assets_folder=code, enabled=True))
+    except IntegrityError as exc:  # last-resort guard (race / unexpected unique clash)
+        raise UploadError(f"Could not add that {kind} — it may already exist.") from exc
 
 
 def list_books(*, status=None, subject=None, language=None, school=None,
@@ -228,16 +314,17 @@ def delete_book(book_id: int) -> dict:
         collection.delete(where={"book_id": book.id})
     except Exception:
         pass  # vectors may already be gone; the DB delete is the source of truth
-    for p in {book.pdf_path, _upload_path(book)}:
+    for p in {book.pdf_path, _source_path(book)}:
         if p:
             Path(p).unlink(missing_ok=True)
     book.delete()
     return {"id": book_id, "deleted": True}
 
 
-def _upload_path(book: Book) -> str | None:
+def _source_path(book: Book) -> str | None:
+    """Absolute path to the book's source file in the corpus (ASSETS_DIR-relative)."""
     try:
-        return str(Path(settings.UPLOADS_DIR) / book.source_file)
+        return str(Path(settings.ASSETS_DIR) / book.source_file)
     except Exception:
         return None
 

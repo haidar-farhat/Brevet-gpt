@@ -28,8 +28,6 @@ const STAGE_LABEL: Record<string, string> = {
   done: 'Done',
 };
 
-const SUBJECTS = ['math', 'physics', 'chemistry', 'biology', 'informatics', 'grammar', 'reading', 'french', 'english'];
-
 const EXAMPLES = [
   { q: 'What is a mole in chemistry?', language: 'en', subject: 'chemistry' },
   { q: 'How does the human eye form an image?', language: 'en', subject: 'physics' },
@@ -44,7 +42,7 @@ const EXAMPLES = [
   styleUrl: './app.css',
 })
 export class App {
-  readonly subjects = SUBJECTS;
+  readonly subjects = signal<{ code: string; name_en: string; name_fr: string }[]>([]);
   readonly examples = EXAMPLES;
 
   // Which screen is showing: the study assistant or the materials manager.
@@ -128,8 +126,10 @@ export class App {
     private readonly sanitizer: DomSanitizer,
     private readonly materials: MaterialsService,
   ) {
-    // Populate the grade selector from the catalog taxonomy (best-effort).
-    this.materials.taxonomy().then((t) => this.grades.set(t.grades)).catch(() => {});
+    // Populate the subject + grade selectors from the catalog taxonomy (best-effort).
+    this.materials.taxonomy()
+      .then((t) => { this.subjects.set(t.subjects); this.grades.set(t.grades); })
+      .catch(() => {});
   }
 
   /** Final answer rendered as Markdown + LaTeX (used once streaming finishes). */
@@ -140,6 +140,18 @@ export class App {
   tone(value: number | null | undefined): string {
     if (value == null) return 'muted';
     return value >= 0.7 ? 'good' : value >= 0.5 ? 'ok' : 'bad';
+  }
+
+  /** Localized display name for a subject (falls back to its code). */
+  subjectLabel(s: { code: string; name_en: string; name_fr: string }): string {
+    return (this.language() === 'fr' ? s.name_fr : s.name_en) || s.code;
+  }
+
+  /** Localized display name for a subject by code (citations / routed pill). */
+  subjectName(code: string | null | undefined): string {
+    if (!code) return '';
+    const s = this.subjects().find((x) => x.code === code);
+    return s ? this.subjectLabel(s) : code;
   }
 
   answerTitle(): string {

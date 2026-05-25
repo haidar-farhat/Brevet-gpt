@@ -24,10 +24,26 @@ def _err(message: str, status: int = 400):
 
 # --- taxonomy ---------------------------------------------------------------
 async def taxonomy_view(request):
-    if request.method != "GET":
-        return _err("GET required", 405)
-    data = await asyncio.to_thread(materials.taxonomy)
-    return JsonResponse(data, json_dumps_params=_JSON)
+    """GET → the routing vocabularies; POST {kind, name} → create (or reuse) a term
+    (language / subject / school / grade) for the 'add new' UI controls."""
+    if request.method == "GET":
+        data = await asyncio.to_thread(materials.taxonomy)
+        return JsonResponse(data, json_dumps_params=_JSON)
+    if request.method == "POST":
+        try:
+            payload = json.loads(request.body or b"{}")
+        except json.JSONDecodeError:
+            return _err("invalid JSON body")
+        try:
+            term = await asyncio.to_thread(
+                materials.create_taxonomy_term,
+                (payload.get("kind") or "").strip(), payload.get("name") or "",
+            )
+        except materials.UploadError as exc:
+            return _err(str(exc))
+        return JsonResponse({"kind": (payload.get("kind") or "").strip(), "term": term},
+                            json_dumps_params=_JSON)
+    return _err("GET or POST required", 405)
 
 
 taxonomy_view.csrf_exempt = True

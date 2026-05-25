@@ -20,16 +20,24 @@
           <button [class.on]="upLang()===l.code" (click)="upLang.set(l.code)" [disabled]="uploading()" [title]="l.name">{{ l.code.toUpperCase() }}</button>
         }
       </div>
+      <button class="mini" (click)="addTerm('language')" [disabled]="uploading()" title="Add a new language">+ lang</button>
+
       <select class="subject" [ngModel]="upSubject()" (ngModelChange)="upSubject.set($event)" [disabled]="uploading()">
         <option value="">Subject…</option>
-        @for (s of subjects; track s) { <option [value]="s">{{ s }}</option> }
+        @for (s of subjects(); track s.code) { <option [value]="s.code">{{ subjectLabel(s) }}</option> }
       </select>
+      <button class="mini" (click)="addTerm('subject')" [disabled]="uploading()" title="Add a new subject">+</button>
+
       <select class="subject" [ngModel]="upSchool()" (ngModelChange)="upSchool.set($event)" [disabled]="uploading()" title="School">
         @for (sc of schools(); track sc.code) { <option [value]="sc.code">{{ sc.name }}</option> }
       </select>
+      <button class="mini" (click)="addTerm('school')" [disabled]="uploading()" title="Add a new school">+</button>
+
       <select class="subject" [ngModel]="upGrade()" (ngModelChange)="upGrade.set($event)" [disabled]="uploading()" title="Grade">
         @for (g of grades(); track g.code) { <option [value]="g.code">{{ g.name }}</option> }
       </select>
+      <button class="mini" (click)="addTerm('grade')" [disabled]="uploading()" title="Add a new grade">+</button>
+
       <input class="ip lvl" placeholder="Level" [ngModel]="upLevel()" (ngModelChange)="upLevel.set($event)" [disabled]="uploading()" />
       <button class="btn" (click)="startUpload()" [disabled]="!canUpload()">{{ uploading() ? 'Working…' : 'Upload ▷' }}</button>
     </div>
@@ -75,7 +83,7 @@
       </select>
       <select class="subject" [ngModel]="fSubject()" (ngModelChange)="fSubject.set($event); refresh()">
         <option value="">any subject</option>
-        @for (s of subjects; track s) { <option [value]="s">{{ s }}</option> }
+        @for (s of subjects(); track s.code) { <option [value]="s.code">{{ subjectLabel(s) }}</option> }
       </select>
       <select class="subject" [ngModel]="fGrade()" (ngModelChange)="fGrade.set($event); refresh()">
         <option value="">any grade</option>
@@ -97,7 +105,7 @@
                 <button class="link" (click)="openDetail(b.id)">{{ b.title }}</button>
                 @if (b.replaces) { <span class="badge muted">replaces #{{ b.replaces }}</span> }
               </td>
-              <td>{{ b.subject }}</td>
+              <td>{{ subjectName(b.subject) }}</td>
               <td>{{ b.language }}</td>
               <td>{{ b.grade ?? '—' }}</td>
               <td>{{ b.total_pages ?? '—' }}</td>
@@ -119,7 +127,7 @@
     <section class="seg">
       <div class="seg-head">
         <span class="seg-title">{{ d.title }}</span>
-        <span class="muted">&nbsp;{{ d.subject }} · {{ d.language }} · {{ d.chunk_count }} chunks · {{ d.status }}</span>
+        <span class="muted">&nbsp;{{ subjectName(d.subject) }} · {{ d.language }} · {{ d.chunk_count }} chunks · {{ d.status }}</span>
         <span class="spacer"></span>
         <button class="mini" (click)="closeDetail()">close</button>
       </div>
@@ -144,7 +152,7 @@
       @if (!hits.length) { <div class="muted">no matches.</div> }
       @for (h of hits; track $index) {
         <div class="hit">
-          <div class="meta">{{ h.book }} · {{ h.subject }} · p.{{ h.page_start }}@if (h.heading) { — {{ h.heading }}} <span class="sim">sim {{ h.sim }}</span></div>
+          <div class="meta">{{ h.book }} · {{ subjectName(h.subject) }} · p.{{ h.page_start }}@if (h.heading) { — {{ h.heading }}} <span class="sim">sim {{ h.sim }}</span></div>
           <div class="snip">{{ h.snippet }}</div>
         </div>
       }

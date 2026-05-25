@@ -68,6 +68,20 @@ export class MaterialsService {
     return res.json();
   }
 
+  /** Create (or reuse) a routing term from a human name; returns the new term. */
+  async createTerm(kind: 'language' | 'subject' | 'school' | 'grade', name: string): Promise<{ kind: string; term: any }> {
+    const res = await fetch(`${this.base}/api/taxonomy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind, name }),
+    });
+    if (!res.ok) {
+      const msg = await res.json().catch(() => ({}));
+      throw new Error(msg.error || `HTTP ${res.status}`);
+    }
+    return res.json();
+  }
+
   async list(filters: Record<string, string | null> = {}): Promise<{ books: MaterialBook[]; ingest_in_progress: boolean }> {
     const qs = Object.entries(filters)
       .filter(([, v]) => v)

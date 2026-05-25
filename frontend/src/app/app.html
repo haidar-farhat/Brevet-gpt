@@ -34,7 +34,7 @@
       </div>
       <select class="subject" [ngModel]="subject()" (ngModelChange)="subject.set($event)" [disabled]="busy()">
         <option value="">Any subject</option>
-        @for (s of subjects; track s) { <option [value]="s">{{ s }}</option> }
+        @for (s of subjects(); track s.code) { <option [value]="s.code">{{ subjectLabel(s) }}</option> }
       </select>
       <select class="subject" [ngModel]="grade()" (ngModelChange)="grade.set($event)" [disabled]="busy()">
         <option value="">All grades</option>
@@ -83,7 +83,7 @@
         <span class="spacer"></span>
         @if (cached()) { <span class="pill cached">⚡ cached</span> }
         @if (routed().language) { <span class="pill">{{ routed().language }}</span> }
-        @if (routed().subject) { <span class="pill">{{ routed().subject }}</span> }
+        @if (routed().subject) { <span class="pill">{{ subjectName(routed().subject) }}</span> }
         @if (answer() && !busy()) { <button class="copy" (click)="copy()">{{ copied() ? 'Copied ✓' : 'Copy' }}</button> }
       </div>
       <div class="answer-body">
@@ -152,7 +152,7 @@
             <button class="src-head" (click)="toggleSource(c.n)">
               <span class="chev">{{ isExpanded(c.n) ? '▾' : '▸' }}</span>
               <span class="n">{{ c.n }}</span>
-              <span class="meta">{{ c.subject }} · {{ c.book }} · p.{{ c.page_start }}@if (c.page_end !== c.page_start) {-{{ c.page_end }}}@if (c.heading) { — {{ c.heading }} }</span>
+              <span class="meta">{{ subjectName(c.subject) }} · {{ c.book }} · p.{{ c.page_start }}@if (c.page_end !== c.page_start) {-{{ c.page_end }}}@if (c.heading) { — {{ c.heading }} }</span>
               <span class="spacer"></span>
               <span class="sim">sim {{ c.dense_sim }}</span>
             </button>

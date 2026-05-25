@@ -1,9 +1,11 @@
 import os
 import re
 import sys
+import json
 import shutil
 import time
 import argparse
+import unicodedata
 import urllib.request
 from statistics import median
 
@@ -24,7 +26,10 @@ from reportlab.pdfbase.ttfonts import TTFont
 # CONFIG
 # =========================
 
-BOOKS_FOLDER = r"C:\Users\Admin\Documents\books"
+# Derive from this file's own location (the repo root) so paths are portable
+# across machines instead of being pinned to one user's disk. The Django wrapper
+# (apps/catalog/services/ocr.py) further overrides RESULTS_FOLDER to settings.RESULTS_DIR.
+BOOKS_FOLDER = os.path.dirname(os.path.abspath(__file__))
 RESULTS_FOLDER = os.path.join(BOOKS_FOLDER, "results")
 
 # Each input subfolder maps to: (tesseract lang, results subdir, ISO 639-1 code).
@@ -32,7 +37,39 @@ RESULTS_FOLDER = os.path.join(BOOKS_FOLDER, "results")
 LANG_FOLDERS = {
     "english": ("eng", "eng", "en"),
     "french": ("fra", "fr", "fr"),
+    "arabic": ("ara", "ar", "ar"),
 }
+
+# Arabic / RTL script ranges. Lines containing these are right-aligned and Unicode-
+# normalised (NFKC) so the embedded *text layer* stays clean, logical Arabic — which
+# is what the RAG pipeline extracts and embeds. We deliberately do NOT reshape glyphs
+# into the PDF: reshaping would corrupt the extractable text the AI depends on.
+_RTL_RE = re.compile(r"[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]")
+
+
+def is_rtl(text):
+    return bool(_RTL_RE.search(text or ""))
+
+
+# Optional Arabic shaping for the *visual* PDF only (cursive joining + RTL order).
+# The embedded/searchable text comes from the logical OCR sidecar, NOT from re-
+# extracting this PDF, so shaping here can never corrupt what the RAG pipeline reads.
+try:
+    import arabic_reshaper as _arabic_reshaper
+    from bidi.algorithm import get_display as _get_display
+    _RTL_SHAPE = True
+except Exception:  # pragma: no cover - libs optional
+    _RTL_SHAPE = False
+
+
+def shape_rtl(text):
+    """Reshape + bidi-reorder Arabic for correct visual display in the rendered PDF."""
+    if _RTL_SHAPE:
+        try:
+            return _get_display(_arabic_reshaper.reshape(text))
+        except Exception:
+            return text
+    return text
 
 # Where we drop language packs we have to fetch ourselves (no admin rights
 # needed, unlike writing into the Tesseract install dir).
@@ -40,6 +77,30 @@ LOCAL_TESSDATA = os.path.join(BOOKS_FOLDER, "tessdata")
 # "tessdata_fast" = good accuracy, smaller/faster. Switch to "tessdata_best"
 # for maximum accuracy on accented French at the cost of speed.
 TESSDATA_VARIANT = "tessdata_fast"
+# Per-language override: Arabic recognition is markedly better with the 'best'
+# model, so 'ara' always gets a local best copy (other languages stay fast).
+TESSDATA_VARIANT_BY_LANG = {"ara": "tessdata_best"}
+
+
+def _variant_for(lang):
+    return TESSDATA_VARIANT_BY_LANG.get(lang, TESSDATA_VARIANT)
+
+
+def _local_traineddata(lang):
+    return os.path.join(LOCAL_TESSDATA, f"{lang}.traineddata")
+
+
+def _variant_marker(lang):
+    """Empty marker tagging which variant the local <lang>.traineddata came from, so
+    a stale fast copy is replaced when a 'best' variant is required (size/name alone
+    can't distinguish variants)."""
+    return os.path.join(LOCAL_TESSDATA, f"{lang}.{_variant_for(lang)}")
+
+
+def _has_desired_variant(lang):
+    """Local traineddata present AND (for pinned langs) tagged with the wanted variant."""
+    return os.path.isfile(_local_traineddata(lang)) and (
+        lang not in TESSDATA_VARIANT_BY_LANG or os.path.isfile(_variant_marker(lang)))
 
 # Render quality. NOTE: the previous version did `min(DPI/72, 2.0)`, which
 # silently capped every page at ~144 DPI. Tesseract wants ~300 DPI, so we now
@@ -128,8 +189,9 @@ def _install_tessdata_dir():
     return None
 
 def _download_traineddata(lang, dest):
-    url = f"https://github.com/tesseract-ocr/{TESSDATA_VARIANT}/raw/main/{lang}.traineddata"
-    print(f"  downloading {lang}.traineddata from {TESSDATA_VARIANT} ...")
+    variant = _variant_for(lang)
+    url = f"https://github.com/tesseract-ocr/{variant}/raw/main/{lang}.traineddata"
+    print(f"  downloading {lang}.traineddata from {variant} ...")
     req = urllib.request.Request(url, headers={"User-Agent": "ocr-books/1.0"})
     tmp = dest + ".part"
     try:
@@ -142,7 +204,7 @@ def _download_traineddata(lang, dest):
         raise RuntimeError(
             f"could not download '{lang}': {e}\n"
             f"  Manually place {lang}.traineddata in {LOCAL_TESSDATA}\n"
-            f"  (get it from https://github.com/tesseract-ocr/{TESSDATA_VARIANT})"
+            f"  (get it from https://github.com/tesseract-ocr/{_variant_for(lang)})"
         )
 
 def ensure_languages(needed):
@@ -159,20 +221,30 @@ def ensure_languages(needed):
     except Exception:
         installed = set()
 
-    if needed <= installed:
+    # Languages pinned to a specific variant (Arabic -> best): never accept a
+    # system/fast copy — require a local copy tagged with the desired variant.
+    force = {l for l in needed if l in TESSDATA_VARIANT_BY_LANG and not _has_desired_variant(l)}
+    if needed <= installed and not force:
+        # Everything is in the system tessdata; clear any LOCAL override left by an
+        # earlier call (e.g. an Arabic upload) so this language uses the system data.
+        os.environ.pop("TESSDATA_PREFIX", None)
         return "", installed
 
-    print(f"\nMissing language data {sorted(needed - installed)} -> preparing {LOCAL_TESSDATA}")
+    print(f"\nPreparing {LOCAL_TESSDATA} (missing {sorted(needed - installed)}; best: {sorted(force)})")
     os.makedirs(LOCAL_TESSDATA, exist_ok=True)
     install_dir = _install_tessdata_dir()
     available = set()
 
     for lang in sorted(needed):
-        dest = os.path.join(LOCAL_TESSDATA, f"{lang}.traineddata")
-        if os.path.isfile(dest):
+        dest = _local_traineddata(lang)
+        # Reuse only if present AND (for pinned langs) tagged with the desired variant;
+        # a stale fast copy of a pinned lang is re-downloaded as 'best'.
+        if _has_desired_variant(lang) if lang in TESSDATA_VARIANT_BY_LANG else os.path.isfile(dest):
             available.add(lang)
             continue
-        src = os.path.join(install_dir, f"{lang}.traineddata") if install_dir else None
+        # Forced-variant langs skip the install copy and download the right variant.
+        src = None if lang in TESSDATA_VARIANT_BY_LANG else (
+            os.path.join(install_dir, f"{lang}.traineddata") if install_dir else None)
         if src and os.path.isfile(src):
             shutil.copy2(src, dest)
             print(f"  copied {lang}.traineddata from install")
@@ -180,9 +252,17 @@ def ensure_languages(needed):
             continue
         try:
             _download_traineddata(lang, dest)
+            if lang in TESSDATA_VARIANT_BY_LANG:
+                open(_variant_marker(lang), "w").close()  # tag the variant we fetched
             available.add(lang)
         except RuntimeError as e:
             print(f"  WARNING: {e}")
+            # Fall back to the installed copy (e.g. fast Arabic) if download failed.
+            fb = os.path.join(install_dir, f"{lang}.traineddata") if install_dir else None
+            if fb and os.path.isfile(fb):
+                shutil.copy2(fb, dest)
+                available.add(lang)
+                print(f"  fell back to installed {lang}.traineddata")
 
     # Env var is more robust than --tessdata-dir: pytesseract splits the config
     # string on whitespace without honouring quotes, which mangles paths.
@@ -355,6 +435,56 @@ def build_paragraphs(lines, page_h):
         })
     return paras
 
+# Optional EasyOCR — a stronger neural OCR for Arabic (RTL-native; far better word
+# spacing & diacritics than Tesseract). Recognition/detection models download on
+# first use; we fall back to Tesseract if EasyOCR is unavailable or errors.
+try:
+    import easyocr as _easyocr
+    _EASYOCR_OK = True
+except Exception:  # pragma: no cover - optional dep
+    _EASYOCR_OK = False
+
+_EASYOCR_LANGS = {"ara": ["ar"]}  # tesseract lang -> easyocr lang codes
+_easyocr_readers = {}
+
+
+def _easyocr_reader(lang):
+    if lang not in _easyocr_readers:  # Reader load is heavy — cache per language
+        _easyocr_readers[lang] = _easyocr.Reader(_EASYOCR_LANGS[lang], gpu=False, verbose=False)
+    return _easyocr_readers[lang]
+
+
+def easyocr_text(img, lang):
+    """Page text via EasyOCR, paragraph-grouped in reading order (RTL-aware)."""
+    lines = _easyocr_reader(lang).readtext(img, detail=0, paragraph=True)
+    return "\n\n".join(s for s in lines if s and s.strip())
+
+
+def ocr_page_text(img, lang, tessdata_arg):
+    """Canonical page text in correct reading order. For Arabic prefer EasyOCR (a much
+    stronger neural OCR for RTL); fall back to Tesseract image_to_string otherwise or
+    if EasyOCR is unavailable/fails."""
+    if _EASYOCR_OK and lang in _EASYOCR_LANGS:
+        try:
+            text = easyocr_text(img, lang)
+            if text.strip():
+                return text
+        except Exception as e:  # pragma: no cover
+            print(f"  WARNING: EasyOCR failed ({e}); falling back to Tesseract")
+    cfg = f"{TESSERACT_CONFIG} {tessdata_arg}".strip()
+    return pytesseract.image_to_string(img, lang=lang, config=cfg)
+
+def paras_from_text(text):
+    """Split canonical OCR text into paragraph dicts (blank-line separated). Carries
+    the keys classify_headings inspects, set so these paras are kept as body text."""
+    paras = []
+    for block in re.split(r"\n\s*\n", text or ""):
+        t = re.sub(r"\s+", " ", block).strip()
+        if t:
+            paras.append({"text": t, "level": 0, "in_margin": False,
+                          "words": len(t.split()), "conf": 0.0, "height": 0.0, "top": 0})
+    return paras
+
 def looks_like_heading(text):
     """Reject body fragments, equations and list items that happen to be large.
 
@@ -466,7 +596,15 @@ def render_pdf(pages, out_path, meta):
             else:
                 size, font, lead, gap = BODY_SIZE, FONT_NAME, BODY_LEAD, PARA_GAP
 
-            wrapped = wrap_text(p["text"], max_width, font, size)
+            # Arabic/RTL: NFKC-normalise (canonical, logical text -> clean extractable
+            # layer for the RAG pipeline) and right-align. Logical order is kept (no
+            # glyph reshaping) so PyMuPDF re-extracts proper Arabic for embedding.
+            text = p["text"]
+            rtl = is_rtl(text)
+            if rtl:
+                text = unicodedata.normalize("NFKC", text)
+
+            wrapped = wrap_text(text, max_width, font, size)
             if not wrapped:
                 continue
 
@@ -474,14 +612,17 @@ def render_pdf(pages, out_path, meta):
             if p["level"] and y - lead < MARGIN and y < page_h - MARGIN:
                 y = new_page()
             if p["level"]:
-                add_outline(p["text"], p["level"])
+                add_outline(text, p["level"])
 
             c.setFont(font, size)
             for ln in wrapped:
                 if y - lead < MARGIN:
                     y = new_page()
                     c.setFont(font, size)
-                c.drawString(MARGIN, y, ln)
+                if rtl:
+                    c.drawRightString(page_w - MARGIN, y, shape_rtl(ln))
+                else:
+                    c.drawString(MARGIN, y, ln)
                 y -= lead
             y -= gap
 
@@ -519,9 +660,15 @@ def process_pdf(pdf_path, lang, tessdata_arg, out_dir, iso, sample=0, start=0):
         all_heights.extend(ln["height"] for ln in lines)
         confs.extend(ln["conf"] for ln in lines)
         printed = detect_printed_page(lines, img.shape[0])
-        paras = build_paragraphs(lines, img.shape[0])
+        if lang == "ara":
+            # Arabic: word-box reconstruction reverses/garbles RTL — use Tesseract's
+            # canonical reading-order text for both the embedded sidecar and the render.
+            paras = paras_from_text(ocr_page_text(img, lang, tessdata_arg))
+        else:
+            paras = build_paragraphs(lines, img.shape[0])
         label = f"p. {printed}" if printed is not None else f"p. {i + 1}*"
-        pages.append({"label": label, "paras": paras})
+        pages.append({"number": printed if printed is not None else (i + 1),
+                      "label": label, "paras": paras})
     doc.close()
 
     body_height = median(all_heights) if all_heights else 0
@@ -537,6 +684,19 @@ def process_pdf(pdf_path, lang, tessdata_arg, out_dir, iso, sample=0, start=0):
         "keywords": [iso, subject, "OCR", "scanned textbook"],
     }
     render_pdf(pages, out_path, meta)
+
+    # Logical-text sidecar: the RAG pipeline embeds THIS clean logical text, never the
+    # re-extracted PDF — a PDF reader's bidi mangles Arabic / mixed-RTL on extraction.
+    sidecar = os.path.splitext(out_path)[0] + ".ocr.json"
+    try:
+        with open(sidecar, "w", encoding="utf-8") as fh:
+            json.dump({"pages": [
+                {"number": pg.get("number"),
+                 "paras": [{"text": p.get("text", ""), "level": p.get("level", 0)} for p in pg["paras"]]}
+                for pg in pages
+            ]}, fh, ensure_ascii=False)
+    except Exception as e:  # pragma: no cover
+        print(f"  WARNING: could not write OCR sidecar: {e}")
 
     print(f"  saved: {out_path}")
     print(f"  pages: {hi - lo} | headings: {headings} | mean OCR conf: {mean_conf:.1f} | {time.time() - t0:.1f}s")

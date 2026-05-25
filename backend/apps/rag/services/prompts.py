@@ -59,7 +59,7 @@ Subjects: math, physics, chemistry, biology, informatics, grammar, reading, fren
 
 Given a student question, respond with JSON ONLY:
 {
-  "language": "fr" or "en",
+  "language": "fr", "en", or "ar",
   "subject": one of the subjects above, or null if unsure,
   "search_queries": ["...", "..."]
 }
@@ -75,7 +75,7 @@ curriculum. Subjects: math, physics, chemistry, biology, informatics, grammar, r
 
 Analyse the student's message and respond with JSON ONLY:
 {
-  "language": "fr" or "en",
+  "language": "fr", "en", or "ar",
   "subject": one of the subjects above, or null if unclear,
   "in_scope": true if it is a learning question about these school subjects; false if it is \
 unrelated (small talk, coding requests, news, personal chat, etc.),
@@ -107,9 +107,11 @@ return exactly one entry.
 it — the polynomial P(x)=…, given values, the numbers from a figure, definitions — so it can be solved \
 without seeing the other parts.
 - The input may be pasted STACKED/multi-line: a digit on the line just under a variable is an EXPONENT \
-("x" then "2" → x^2), and a fraction is stacked with the TOP line the numerator and the BOTTOM line the \
-denominator → rewrite it inline as (top)/(bottom). Convert each part to clean INLINE math, keeping the \
-student's EXACT numbers.
+("x" then "2" → x^2). A fraction is stacked over two lines, but in pasted text the line ORDER is \
+UNRELIABLE — so for an equation "(fraction) = 0" write it inline with the FACTORABLE / higher-degree \
+polynomial as the NUMERATOR and the simpler/linear factor as the DENOMINATOR (the standard rational- \
+equation form), e.g. the lines "x-14" and "x^2-196" → "(x^2-196)/(x-14)=0". Convert each part to clean \
+INLINE math, keeping the student's EXACT numbers.
 - Keep the original wording and numbers. Do NOT solve anything here. Use the same language as the problem.\
 """
 
@@ -177,10 +179,12 @@ words and solve as far as you can.
 
 Be careful with the maths:
 - Square roots: x^2 = 49 gives x = ±7 (the root of 49), NOT ±49.
-- A fraction is numerator-over-denominator; if it is stacked over two lines, the TOP line is the \
-numerator and the BOTTOM line is the denominator. For a rational equation, FIRST state \
-"Numerator = …, Denominator = …", then set the NUMERATOR = 0 and EXCLUDE any value that makes the \
-DENOMINATOR = 0 (state the excluded value; if the only root is excluded, there is no solution).
+- For a rational equation "(fraction) = 0": plain-text line order is UNRELIABLE, so pick by ROLE, not \
+position — the NUMERATOR is the polynomial whose roots are the candidate solutions (usually the \
+factorable / higher-degree one, e.g. x^2-196), and the DENOMINATOR is the factor that must stay non-zero \
+(usually linear, e.g. x-14). FIRST state "Numerator = …, Denominator = …", then set the NUMERATOR = 0, \
+and EXCLUDE any value making the DENOMINATOR = 0 (e.g. (x^2-196)/(x-14)=0 → numerator roots x=±14, \
+exclude x=14 → answer x=-14). If the only numerator root is excluded, there is no solution.
 
 FORMATTING:
 - Use $...$ or $$...$$ ONLY for real maths; never wrap ordinary words in \\text{}.
@@ -213,6 +217,7 @@ materials. Cite sources as [n]. Write in the same language as the question.\
 REFUSAL = {
     "en": "I don't have enough information in the materials to answer that.",
     "fr": "Je n'ai pas assez d'informations dans les documents pour répondre à cela.",
+    "ar": "لا تتوفّر لديّ معلومات كافية في المستندات للإجابة عن ذلك.",
 }
 
 OUT_OF_SCOPE = {
@@ -222,11 +227,15 @@ OUT_OF_SCOPE = {
     "fr": "Je suis ton tuteur pour le Brevet : je peux seulement t'aider sur les matières de 9e — "
           "maths, physique, chimie, biologie, informatique, français, anglais, grammaire et lecture. "
           "Pose-moi une question sur l'une d'elles et je chercherai dans les manuels !",
+    "ar": "أنا مساعدك للدراسة في صفّ التاسع (البريفيه): يمكنني المساعدة فقط في مواد المنهج — "
+          "الرياضيات والفيزياء والكيمياء والأحياء والمعلوماتية والفرنسية والإنجليزية والقواعد والمطالعة. "
+          "اطرح عليّ سؤالاً من هذه المواد وسأبحث لك في الكتب!",
 }
 
 CLARIFY_FALLBACK = {
     "en": "Could you give me a bit more detail about what you'd like to know?",
     "fr": "Peux-tu préciser un peu ce que tu aimerais savoir ?",
+    "ar": "هل يمكنك توضيح ما الذي تودّ معرفته بمزيد من التفصيل؟",
 }
 
 # Last-resort message so the answer is NEVER blank (used only if generation is
@@ -236,6 +245,8 @@ EMPTY_FALLBACK = {
           "about one part at a time — I'll dig back into the textbooks for you.",
     "fr": "Je n'ai pas réussi à formuler une réponse complète cette fois-ci. Reformule la question, "
           "ou pose-la-moi une partie à la fois — je rechercherai à nouveau dans les manuels.",
+    "ar": "لم أتمكّن من صياغة إجابة كاملة هذه المرة. أعد صياغة السؤال أو اسألني عن جزء واحد في كل مرة، "
+          "وسأبحث مجدّداً في الكتب.",
 }
 
 
@@ -252,6 +263,7 @@ def format_context(chunks) -> str:
 _LANGUAGE_DIRECTIVE = {
     "en": "Write your entire answer in English.",
     "fr": "Rédige toute ta réponse en français.",
+    "ar": "اكتب إجابتك كاملةً باللغة العربية.",
 }
 
 

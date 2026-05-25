@@ -11,7 +11,8 @@ from dataclasses import dataclass
 
 from django.db import connection
 
-from apps.catalog.models import Chunk
+from apps.catalog.enums import BookStatus
+from apps.catalog.models import Book, Chunk
 
 RRF_K = 60
 
@@ -44,12 +45,35 @@ class HybridRetriever:
         self.collection = collection
 
     @staticmethod
-    def _where(language: str | None, subject: str | None):
+    def _frozen_book_ids() -> list[int]:
+        """Books excluded from retrieval (soft-disabled, kept in both stores)."""
+        return list(Book.objects.filter(status=BookStatus.FROZEN).values_list("id", flat=True))
+
+    @staticmethod
+    def _scoped_book_ids(grade: str | None, school: str | None) -> list[int] | None:
+        """Active book ids within the grade/school scope, or None when unscoped.
+        An empty list means 'a scope was chosen but nothing matches' (=> no hits)."""
+        if not grade and not school:
+            return None
+        qs = Book.objects.filter(status=BookStatus.ACTIVE)
+        if grade:
+            qs = qs.filter(grade__code=grade)
+        if school:
+            qs = qs.filter(school__code=school)
+        return list(qs.values_list("id", flat=True))
+
+    @staticmethod
+    def _where(language: str | None, subject: str | None, *,
+               include_book_ids=None, exclude_book_ids=None):
         conds = []
         if language:
             conds.append({"language": language})
         if subject:
             conds.append({"subject": subject})
+        if include_book_ids is not None:
+            conds.append({"book_id": {"$in": list(include_book_ids)}})  # grade/school scope
+        elif exclude_book_ids:
+            conds.append({"book_id": {"$nin": list(exclude_book_ids)}})  # drop frozen books
         if not conds:
             return None
         return conds[0] if len(conds) == 1 else {"$and": conds}
@@ -63,7 +87,8 @@ class HybridRetriever:
         dists = (res.get("distances") or [[]])[0]
         return [(_uid(i), 1.0 - float(d)) for i, d in zip(ids, dists)]
 
-    def _lexical(self, query: str, language, subject, k: int) -> list[tuple[uuid.UUID, float]]:
+    def _lexical(self, query: str, language, subject, k: int, *,
+                 include_book_ids=None, exclude_book_ids=None) -> list[tuple[uuid.UUID, float]]:
         sql = [
             "SELECT vector_id, MATCH(content) AGAINST(%s IN NATURAL LANGUAGE MODE) AS score",
             "FROM chunks",
@@ -76,6 +101,12 @@ class HybridRetriever:
         if subject:
             sql.append("AND subject_id = (SELECT id FROM subjects WHERE code = %s)")
             params.append(subject)
+        if include_book_ids is not None:
+            sql.append(f"AND book_id IN ({', '.join(['%s'] * len(include_book_ids))})")  # grade/school scope
+            params.extend(include_book_ids)
+        elif exclude_book_ids:
+            sql.append(f"AND book_id NOT IN ({', '.join(['%s'] * len(exclude_book_ids))})")  # drop frozen
+            params.extend(exclude_book_ids)
         sql.append("ORDER BY score DESC LIMIT %s")
         params.append(k)
         with connection.cursor() as cursor:
@@ -84,11 +115,19 @@ class HybridRetriever:
         return [(_uid(vid), float(score)) for vid, score in rows if vid is not None]
 
     def retrieve_candidates(self, queries: list[str], language: str | None, subject: str | None, *,
-                            candidates: int) -> tuple[list[RetrievedChunk], float]:
+                            candidates: int, grade: str | None = None,
+                            school: str | None = None) -> tuple[list[RetrievedChunk], float]:
         """Dense + lexical retrieval fused by RRF, hydrated into RetrievedChunks
         in fused order (NOT yet truncated to a token budget). Returns (candidates,
         best_dense_sim)."""
-        where = self._where(language, subject)
+        # Exclude frozen (soft-disabled) books at every layer so their chunks never
+        # consume candidate slots, taint RRF, or reach the answer. When a grade/school
+        # scope is given, restrict to that scope's (active) books instead.
+        frozen = self._frozen_book_ids()
+        scope = self._scoped_book_ids(grade, school)
+        if scope is not None and not scope:
+            return [], 0.0  # a scope was chosen but no active book matches it
+        where = self._where(language, subject, include_book_ids=scope, exclude_book_ids=frozen)
         dense_sim: dict[uuid.UUID, float] = {}
         rank_lists: list[list[uuid.UUID]] = []
 
@@ -97,16 +136,21 @@ class HybridRetriever:
             for uid, sim in dense_hits:
                 dense_sim[uid] = max(dense_sim.get(uid, -1.0), sim)
             rank_lists.append([uid for uid, _ in dense_hits])
-            rank_lists.append([uid for uid, _ in self._lexical(query, language, subject, candidates)])
+            rank_lists.append([uid for uid, _ in self._lexical(
+                query, language, subject, candidates,
+                include_book_ids=scope, exclude_book_ids=frozen)])
 
         fused = _rrf(rank_lists)
         if not fused:
             return [], 0.0
 
         rrf_score = dict(fused)
+        hydrate = Chunk.objects.filter(vector_id__in=[uid for uid, _ in fused])
+        hydrate = (hydrate.filter(book_id__in=scope) if scope is not None
+                   else hydrate.filter(book__status=BookStatus.ACTIVE))
         chunks = {
             _uid(c.vector_id): c
-            for c in Chunk.objects.filter(vector_id__in=[uid for uid, _ in fused]).select_related("book", "subject")
+            for c in hydrate.select_related("book", "subject")
         }
 
         result: list[RetrievedChunk] = []
@@ -149,9 +193,11 @@ class HybridRetriever:
         return selected
 
     def retrieve(self, queries: list[str], language: str | None, subject: str | None, *,
-                 candidates: int, top_k: int, token_budget: int) -> tuple[list[RetrievedChunk], float]:
+                 candidates: int, top_k: int, token_budget: int,
+                 grade: str | None = None, school: str | None = None) -> tuple[list[RetrievedChunk], float]:
         """Legacy one-shot retrieve (used by the non-agentic pipeline)."""
-        result, best_sim = self.retrieve_candidates(queries, language, subject, candidates=candidates)
+        result, best_sim = self.retrieve_candidates(
+            queries, language, subject, candidates=candidates, grade=grade, school=school)
         return self.select_within_budget(result, top_k=top_k, token_budget=token_budget), best_sim
 
 

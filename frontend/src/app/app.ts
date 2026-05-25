@@ -4,6 +4,8 @@ import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 
 import { BrevetEvent, BrevetService } from './brevet.service';
 import { renderRich } from './format';
+import { ManageComponent } from './manage.component';
+import { MaterialsService } from './materials.service';
 
 interface LogLine {
   stage: string;
@@ -26,8 +28,6 @@ const STAGE_LABEL: Record<string, string> = {
   done: 'Done',
 };
 
-const SUBJECTS = ['math', 'physics', 'chemistry', 'biology', 'informatics', 'grammar', 'reading', 'french', 'english'];
-
 const EXAMPLES = [
   { q: 'What is a mole in chemistry?', language: 'en', subject: 'chemistry' },
   { q: 'How does the human eye form an image?', language: 'en', subject: 'physics' },
@@ -37,18 +37,24 @@ const EXAMPLES = [
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule],
+  imports: [FormsModule, ManageComponent],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
 export class App {
-  readonly subjects = SUBJECTS;
+  readonly subjects = signal<{ code: string; name_en: string; name_fr: string }[]>([]);
   readonly examples = EXAMPLES;
+
+  // Which screen is showing: the study assistant or the materials manager.
+  readonly view = signal<'study' | 'manage'>('study');
+  private abort: AbortController | null = null;
 
   // Inputs
   readonly question = signal('');
-  readonly language = signal<'auto' | 'en' | 'fr'>('auto');
+  readonly language = signal<'auto' | 'en' | 'fr' | 'ar'>('auto');
   readonly subject = signal('');
+  readonly grade = signal('');                                   // '' = all grades
+  readonly grades = signal<{ code: string; name: string }[]>([]);
 
   // Run state
   readonly busy = signal(false);
@@ -115,7 +121,16 @@ export class App {
     };
   });
 
-  constructor(private readonly api: BrevetService, private readonly sanitizer: DomSanitizer) {}
+  constructor(
+    private readonly api: BrevetService,
+    private readonly sanitizer: DomSanitizer,
+    private readonly materials: MaterialsService,
+  ) {
+    // Populate the subject + grade selectors from the catalog taxonomy (best-effort).
+    this.materials.taxonomy()
+      .then((t) => { this.subjects.set(t.subjects); this.grades.set(t.grades); })
+      .catch(() => {});
+  }
 
   /** Final answer rendered as Markdown + LaTeX (used once streaming finishes). */
   renderedAnswer(): SafeHtml {
@@ -125,6 +140,18 @@ export class App {
   tone(value: number | null | undefined): string {
     if (value == null) return 'muted';
     return value >= 0.7 ? 'good' : value >= 0.5 ? 'ok' : 'bad';
+  }
+
+  /** Localized display name for a subject (falls back to its code). */
+  subjectLabel(s: { code: string; name_en: string; name_fr: string }): string {
+    return (this.language() === 'fr' ? s.name_fr : s.name_en) || s.code;
+  }
+
+  /** Localized display name for a subject by code (citations / routed pill). */
+  subjectName(code: string | null | undefined): string {
+    if (!code) return '';
+    const s = this.subjects().find((x) => x.code === code);
+    return s ? this.subjectLabel(s) : code;
   }
 
   answerTitle(): string {
@@ -166,7 +193,7 @@ export class App {
   setExample(ex: { q: string; language: string; subject: string }): void {
     if (this.busy()) return;
     this.question.set(ex.q);
-    this.language.set(ex.language as 'auto' | 'en' | 'fr');
+    this.language.set(ex.language as 'auto' | 'en' | 'fr' | 'ar');
     this.subject.set(ex.subject);
   }
 
@@ -207,6 +234,8 @@ export class App {
 
     const lang = this.language() === 'auto' ? null : this.language();
     const subject = this.subject().trim() || null;
+    const grade = this.grade() || null;
+    this.abort = new AbortController();
 
     await this.api.ask(q, lang, subject, {
       onEvent: (ev) => this.handleEvent(ev),
@@ -214,8 +243,19 @@ export class App {
       onDone: () => {
         this.busy.set(false);
         this.stage.set('done');
+        this.abort = null;
       },
-    });
+    }, this.abort.signal, grade);
+  }
+
+  /** Abort an in-flight query (the SSE fetch is cancelled via AbortSignal). */
+  stop(): void {
+    if (!this.busy()) return;
+    this.abort?.abort();
+    this.abort = null;
+    this.busy.set(false);
+    this.stage.set('done');
+    this.pushLog('answer', 'warn', 'stopped by user');
   }
 
   private handleEvent(ev: BrevetEvent): void {

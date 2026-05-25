@@ -11,26 +11,20 @@ the Book into MySQL, then embeds its chunks into ChromaDB + MySQL.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
-import fitz  # PyMuPDF
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.utils import timezone
 
-from apps.catalog.enums import Language, SubjectCode
+from apps.catalog.data import taxonomy
+from apps.catalog.enums import LanguageCode, SubjectCode
 from apps.catalog.metadata import clean_title
-from apps.catalog.models import Book, Subject
+from apps.catalog.models import Book, Grade, School, Subject
+from apps.catalog.services import ocr as ocr_svc
 from apps.catalog.services.embeddings import build_embedder
-from apps.catalog.services.ingest import ingest_book
+from apps.catalog.services.ingest import build_records, ingest_book
 from apps.catalog.services.vectorstore import get_collection
-
-# language code -> (tesseract lang, gpu_ocr_books results subdir, assets folder)
-_LANG_MAP: dict[str, tuple[str, str, str]] = {
-    "en": ("eng", "eng", "english"),
-    "fr": ("fra", "fr", "french"),
-}
 
 
 class Command(BaseCommand):
@@ -38,7 +32,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("--input", type=Path, default=None, help="Path to the scanned PDF.")
-        parser.add_argument("--language", choices=tuple(_LANG_MAP), default=None)
+        parser.add_argument("--language", choices=tuple(LanguageCode.values), default=None)
         parser.add_argument("--subject", choices=tuple(SubjectCode.values), default=None)
         parser.add_argument("--title", default=None)
         parser.add_argument("--level", default="brevet")
@@ -49,21 +43,24 @@ class Command(BaseCommand):
 
     def handle(self, *args: object, **options: object) -> None:
         interactive = not options["non_interactive"]
+        lang_map = ocr_svc.lang_map()
 
         # --- 1. Gather routing variables -------------------------------------
         input_path = self._resolve_input(options["input"], interactive)
         language = options["language"] or self._choose(
-            "Language", {code: label for code, label in Language.choices if code in _LANG_MAP}, interactive
+            "Language", {code: label for code, label in LanguageCode.choices if code in lang_map}, interactive
         )
         subject_code = options["subject"] or self._choose(
             "Subject", dict(SubjectCode.choices), interactive
         )
-        default_title = clean_title(self._pdf_title(input_path), input_path.name)
+        default_title = clean_title(ocr_svc.pdf_title(input_path), input_path.name)
         title = options["title"] or self._ask("Title", default_title, interactive)
         level = options["level"] or self._ask("Level", "brevet", interactive)
         dry_run = options["dry_run"]
 
         subject = Subject.objects.get(code=subject_code)
+        default_school = School.objects.filter(code=taxonomy.DEFAULT_SCHOOL[1]).first()
+        default_grade = Grade.objects.filter(code=taxonomy.DEFAULT_GRADE_CODE).first()
 
         # Build the embedder up front so a misconfig fails *before* costly OCR.
         embedder = collection = None
@@ -83,17 +80,22 @@ class Command(BaseCommand):
         ))
 
         # --- 2. OCR into a clean structured PDF ------------------------------
-        clean_pdf = self._ocr(input_path, language)
+        try:
+            clean_pdf = ocr_svc.ocr_to_clean_pdf(input_path, language)
+        except ocr_svc.OCRError as exc:
+            raise CommandError(str(exc)) from exc
         self.stdout.write(self.style.SUCCESS(f"OCR complete -> {clean_pdf}"))
 
         # --- 3. Upsert the Book (routing system of record) -------------------
-        _, total_pages = self._pdf_title(clean_pdf), self._page_count(clean_pdf)
+        total_pages = ocr_svc.page_count(clean_pdf)
         book, _ = Book.objects.update_or_create(
             language=language,
-            source_file=f"{_LANG_MAP[language][2]}/{input_path.name}",
+            source_file=f"{lang_map[language][2]}/{input_path.name}",
             defaults={
                 "title": title,
                 "subject": subject,
+                "school": default_school,
+                "grade": default_grade,
                 "level": level,
                 "pdf_path": str(clean_pdf),
                 "total_pages": total_pages,
@@ -103,36 +105,12 @@ class Command(BaseCommand):
 
         # --- 4. Embed (embedder/collection were prepared up front) ----------
         result = ingest_book(
-            book=book, pdf_path=clean_pdf, embedder=embedder, collection=collection, dry_run=dry_run,
+            book=book, records=build_records(clean_pdf), embedder=embedder,
+            collection=collection, dry_run=dry_run,
         )
         self.stdout.write(self.style.SUCCESS(
             f"Done: book #{book.id} '{book.title}' — {result.chunks} chunks, ~{result.tokens} tokens."
         ))
-
-    # ------------------------------------------------------------------ OCR
-    def _ocr(self, input_path: Path, language: str) -> Path:
-        ocr = self._load_ocr_module()
-        tess_lang, out_subdir, _iso = _LANG_MAP[language]
-        _tessdata_arg, available = ocr.ensure_languages({tess_lang})
-        if tess_lang not in available or "osd" not in available:
-            raise CommandError(f"Tesseract language '{tess_lang}' is unavailable; cannot OCR.")
-
-        ocr.process_pdf(str(input_path), tess_lang, _tessdata_arg, out_subdir, _iso)
-        clean_pdf = Path(ocr.RESULTS_FOLDER) / out_subdir / f"{input_path.stem}.pdf"
-        if not clean_pdf.is_file():
-            raise CommandError(f"Expected OCR output not found: {clean_pdf}")
-        return clean_pdf
-
-    @staticmethod
-    def _load_ocr_module():
-        root = str(settings.PROJECT_ROOT)
-        if root not in sys.path:
-            sys.path.insert(0, root)
-        try:
-            import gpu_ocr_books  # noqa: PLC0415 (lazy: heavy OCR deps + Tesseract check on import)
-        except Exception as exc:  # pragma: no cover
-            raise CommandError(f"Could not import gpu_ocr_books from {root}: {exc}") from exc
-        return gpu_ocr_books
 
     # -------------------------------------------------------------- prompts
     def _resolve_input(self, value: Path | None, interactive: bool) -> Path:
@@ -172,20 +150,3 @@ class Command(BaseCommand):
             if answer.isdigit() and 1 <= int(answer) <= len(keys):
                 return keys[int(answer) - 1]
             self.stdout.write(self.style.ERROR("  invalid choice, try again"))
-
-    # ---------------------------------------------------------------- pdf
-    @staticmethod
-    def _pdf_title(pdf: Path) -> str | None:
-        try:
-            with fitz.open(pdf) as doc:
-                return doc.metadata.get("title")
-        except Exception:  # pragma: no cover
-            return None
-
-    @staticmethod
-    def _page_count(pdf: Path) -> int | None:
-        try:
-            with fitz.open(pdf) as doc:
-                return doc.page_count
-        except Exception:  # pragma: no cover
-            return None

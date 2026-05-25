@@ -1,13 +1,20 @@
 <div class="app">
   <header>
-    <div class="brand">Brevet-GPT <span class="sub">study assistant</span></div>
-    @if (busy()) {
-      <div class="status busy"><span class="dot"></span>{{ stageLabel() }}…</div>
-    } @else {
-      <div class="status">ready</div>
+    <div class="brand">Brevet-GPT</div>
+    <nav class="tabs">
+      <button [class.on]="view()==='study'" (click)="view.set('study')">Study Assistant</button>
+      <button [class.on]="view()==='manage'" (click)="view.set('manage')">Manage Materials</button>
+    </nav>
+    @if (view()==='study') {
+      @if (busy()) {
+        <div class="status busy"><span class="dot"></span>{{ stageLabel() }}…</div>
+      } @else {
+        <div class="status">ready</div>
+      }
     }
   </header>
 
+  @if (view() === 'study') {
   <!-- Ask -->
   <section class="ask">
     <textarea
@@ -24,12 +31,18 @@
         <button [class.on]="language()==='auto'" (click)="language.set('auto')" [disabled]="busy()">Auto</button>
         <button [class.on]="language()==='en'" (click)="language.set('en')" [disabled]="busy()">EN</button>
         <button [class.on]="language()==='fr'" (click)="language.set('fr')" [disabled]="busy()">FR</button>
+        <button [class.on]="language()==='ar'" (click)="language.set('ar')" [disabled]="busy()">AR</button>
       </div>
       <select class="subject" [ngModel]="subject()" (ngModelChange)="subject.set($event)" [disabled]="busy()">
         <option value="">Any subject</option>
-        @for (s of subjects; track s) { <option [value]="s">{{ s }}</option> }
+        @for (s of subjects(); track s.code) { <option [value]="s.code">{{ subjectLabel(s) }}</option> }
+      </select>
+      <select class="subject" [ngModel]="grade()" (ngModelChange)="grade.set($event)" [disabled]="busy()">
+        <option value="">All grades</option>
+        @for (g of grades(); track g.code) { <option [value]="g.code">{{ g.name }}</option> }
       </select>
       <button class="ask-btn" (click)="ask()" [disabled]="busy()">{{ busy() ? 'Working…' : 'Ask ▷' }}</button>
+      @if (busy()) { <button class="stop-btn" (click)="stop()" title="Stop the current query">■ Stop</button> }
     </div>
 
     @if (!hasRun()) {
@@ -53,7 +66,7 @@
       </div>
       @if (thinkingOpen()) {
         @if (thinking()) {
-          <div class="reasoning"><pre>{{ thinking() }}<span class="caret" [class.hidden]="!busy()">▋</span></pre></div>
+          <div class="reasoning"><pre dir="auto">{{ thinking() }}<span class="caret" [class.hidden]="!busy()">▋</span></pre></div>
         }
         <div class="steps">
           @for (l of logs(); track $index) {
@@ -71,15 +84,15 @@
         <span class="spacer"></span>
         @if (cached()) { <span class="pill cached">⚡ cached</span> }
         @if (routed().language) { <span class="pill">{{ routed().language }}</span> }
-        @if (routed().subject) { <span class="pill">{{ routed().subject }}</span> }
+        @if (routed().subject) { <span class="pill">{{ subjectName(routed().subject) }}</span> }
         @if (answer() && !busy()) { <button class="copy" (click)="copy()">{{ copied() ? 'Copied ✓' : 'Copy' }}</button> }
       </div>
       <div class="answer-body">
         @if (answer()) {
           @if (busy()) {
-            <pre>{{ answer() }}<span class="caret">▋</span></pre>
+            <pre dir="auto">{{ answer() }}<span class="caret">▋</span></pre>
           } @else {
-            <div class="rich" [innerHTML]="renderedAnswer()"></div>
+            <div class="rich" dir="auto" [innerHTML]="renderedAnswer()"></div>
           }
         } @else if (busy()) {
           <div class="muted">waiting for the answer…</div>
@@ -140,16 +153,19 @@
             <button class="src-head" (click)="toggleSource(c.n)">
               <span class="chev">{{ isExpanded(c.n) ? '▾' : '▸' }}</span>
               <span class="n">{{ c.n }}</span>
-              <span class="meta">{{ c.subject }} · {{ c.book }} · p.{{ c.page_start }}@if (c.page_end !== c.page_start) {-{{ c.page_end }}}@if (c.heading) { — {{ c.heading }} }</span>
+              <span class="meta">{{ subjectName(c.subject) }} · {{ c.book }} · p.{{ c.page_start }}@if (c.page_end !== c.page_start) {-{{ c.page_end }}}@if (c.heading) { — {{ c.heading }} }</span>
               <span class="spacer"></span>
               <span class="sim">sim {{ c.dense_sim }}</span>
             </button>
             @if (isExpanded(c.n)) {
-              <div class="src-body"><pre>{{ c.content }}</pre></div>
+              <div class="src-body"><pre dir="auto">{{ c.content }}</pre></div>
             }
           </div>
         }
       </section>
     }
+  }
+  } @else {
+    <app-manage />
   }
 </div>

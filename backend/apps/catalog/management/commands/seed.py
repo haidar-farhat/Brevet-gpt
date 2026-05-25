@@ -15,15 +15,16 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import transaction
 
+from apps.catalog.data import taxonomy
 from apps.catalog.data.subjects import SUBJECTS
-from apps.catalog.enums import Language
+from apps.catalog.enums import LanguageCode
 from apps.catalog.metadata import clean_title, infer_subject_code
-from apps.catalog.models import Book, Subject
+from apps.catalog.models import Book, Grade, Language, School, Subject
 
-# Corpus subfolder -> medium of instruction.
-_FOLDER_LANGUAGE: dict[str, Language] = {
-    "english": Language.ENGLISH,
-    "french": Language.FRENCH,
+# Corpus subfolder -> medium of instruction (language code).
+_FOLDER_LANGUAGE: dict[str, str] = {
+    "english": LanguageCode.ENGLISH.value,
+    "french": LanguageCode.FRENCH.value,
 }
 
 
@@ -47,6 +48,10 @@ class Command(BaseCommand):
     def handle(self, *args: object, **options: object) -> None:
         seeded = self._seed_subjects()
         self.stdout.write(self.style.SUCCESS(f"Subjects: {seeded} upserted."))
+        tax = self._seed_taxonomy()
+        self.stdout.write(self.style.SUCCESS(
+            f"Taxonomy: {tax['languages']} languages, {tax['schools']} school(s), {tax['grades']} grades."
+        ))
 
         if options["subjects_only"]:
             return
@@ -71,11 +76,29 @@ class Command(BaseCommand):
             )
         return len(SUBJECTS)
 
+    def _seed_taxonomy(self) -> dict[str, int]:
+        for code, name, native, tess, subdir, folder in taxonomy.LANGUAGES:
+            Language.objects.update_or_create(
+                code=code,
+                defaults={"name": name, "native_name": native, "tesseract": tess,
+                          "ocr_subdir": subdir, "assets_folder": folder, "enabled": True},
+            )
+        School.objects.update_or_create(
+            code=taxonomy.DEFAULT_SCHOOL[1], defaults={"name": taxonomy.DEFAULT_SCHOOL[0], "enabled": True}
+        )
+        for name, code, ordinal in taxonomy.GRADES:
+            Grade.objects.update_or_create(
+                code=code, defaults={"name": name, "ordinal": ordinal, "enabled": True}
+            )
+        return {"languages": len(taxonomy.LANGUAGES), "schools": 1, "grades": len(taxonomy.GRADES)}
+
     def _seed_books(self, assets_dir: Path) -> tuple[int, int, int]:
         if not assets_dir.is_dir():
             raise CommandError(f"ASSETS_DIR does not exist: {assets_dir}")
 
         subjects_by_code = {subject.code: subject for subject in Subject.objects.all()}
+        default_school = School.objects.filter(code=taxonomy.DEFAULT_SCHOOL[1]).first()
+        default_grade = Grade.objects.filter(code=taxonomy.DEFAULT_GRADE_CODE).first()
         created = updated = skipped = 0
 
         for folder, language in _FOLDER_LANGUAGE.items():
@@ -99,6 +122,8 @@ class Command(BaseCommand):
                     defaults={
                         "title": title,
                         "subject": subjects_by_code[code],
+                        "school": default_school,
+                        "grade": default_grade,
                         "total_pages": total_pages,
                     },
                 )

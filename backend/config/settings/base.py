@@ -124,6 +124,19 @@ ASSETS_DIR = Path(env("ASSETS_DIR", default=str(PROJECT_ROOT / "assets")))
 # Clean, OCR'd structured PDFs (the embedding input; eng/ and fr/ subfolders).
 RESULTS_DIR = Path(env("RESULTS_DIR", default=str(PROJECT_ROOT / "results")))
 
+# --- Uploads (Manage Materials screen) -----------------------------------
+# Where uploaded source documents are stored (english/ and french/ subfolders).
+UPLOADS_DIR = Path(env("UPLOADS_DIR", default=str(PROJECT_ROOT / "uploads")))
+MAX_UPLOAD_MB = env.int("MAX_UPLOAD_MB", default=100)
+# A PDF whose mean extractable chars/page is below this is treated as scanned (OCR).
+UPLOAD_SCANNED_TEXT_THRESHOLD = env.int("UPLOAD_SCANNED_TEXT_THRESHOLD", default=100)
+# Allow large multipart uploads. FILE_UPLOAD_MAX_MEMORY_SIZE small => files stream
+# to a temp file (not RAM); DATA_UPLOAD_MAX_MEMORY_SIZE bounds the whole body.
+FILE_UPLOAD_MAX_MEMORY_SIZE = env.int("FILE_UPLOAD_MAX_MEMORY_SIZE", default=5 * 1024 * 1024)
+DATA_UPLOAD_MAX_MEMORY_SIZE = env.int(
+    "DATA_UPLOAD_MAX_MEMORY_SIZE", default=(MAX_UPLOAD_MB + 8) * 1024 * 1024
+)
+
 # --- Vector store --------------------------------------------------------
 CHROMA_DIR = Path(env("CHROMA_DIR", default=str(PROJECT_ROOT / "chroma")))
 CHROMA_COLLECTION = env("CHROMA_COLLECTION", default="brevet")

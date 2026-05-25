@@ -19,7 +19,7 @@ from django.utils import timezone
 from apps.catalog.metadata import clean_title, infer_subject_code
 from apps.catalog.models import Book, Subject
 from apps.catalog.services.embeddings import build_embedder
-from apps.catalog.services.ingest import ingest_book
+from apps.catalog.services.ingest import build_records, ingest_book
 from apps.catalog.services.vectorstore import get_collection
 
 # results subdir -> (language code, assets folder used for the Book.source_file)
@@ -81,7 +81,8 @@ class Command(BaseCommand):
                     continue
 
                 result = ingest_book(
-                    book=book, pdf_path=pdf, embedder=embedder, collection=collection, dry_run=dry_run,
+                    book=book, records=build_records(pdf), embedder=embedder,
+                    collection=collection, dry_run=dry_run,
                 )
                 total_books += 1
                 total_chunks += result.chunks

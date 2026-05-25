@@ -28,10 +28,12 @@ export class BrevetService {
     subject: string | null,
     handlers: AskHandlers,
     signal?: AbortSignal,
+    grade?: string | null,
   ): Promise<void> {
     const body: Record<string, unknown> = { question };
     if (language) body['language'] = language;
     if (subject) body['subject'] = subject;
+    if (grade) body['grade'] = grade;
 
     let response: Response;
     try {
@@ -42,7 +44,9 @@ export class BrevetService {
         signal,
       });
     } catch (e: any) {
-      handlers.onError?.(`Cannot reach API at ${this.base}. Is the server running? (${e?.message ?? e})`);
+      if (e?.name !== 'AbortError') {
+        handlers.onError?.(`Cannot reach API at ${this.base}. Is the server running? (${e?.message ?? e})`);
+      }
       handlers.onDone?.();
       return;
     }
@@ -75,7 +79,7 @@ export class BrevetService {
         }
       }
     } catch (e: any) {
-      handlers.onError?.(`Stream interrupted: ${e?.message ?? e}`);
+      if (e?.name !== 'AbortError') handlers.onError?.(`Stream interrupted: ${e?.message ?? e}`);
     } finally {
       handlers.onDone?.();
     }

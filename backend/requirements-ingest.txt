@@ -5,6 +5,9 @@
 chromadb~=1.0
 tiktoken~=0.8
 
+# Word (.docx) text extraction for the Manage Materials upload (no OCR needed).
+python-docx~=1.1
+
 # Local CPU embeddings (default backend). Pulls a CPU-only torch.
 sentence-transformers>=3.0,<6
 # Pin transformers to the stable 4.x line: 5.x (e.g. 5.9.0) segfaults on Windows
@@ -25,3 +28,14 @@ opencv-python-headless~=4.10
 pytesseract~=0.3
 reportlab~=4.2
 tqdm~=4.66
+
+# Arabic / RTL shaping for the OCR'd PDF's *visual* layer (cursive joining + bidi
+# order). The embedded/searchable text comes from the logical OCR sidecar, so these
+# affect only how the clean PDF looks — never what the RAG pipeline reads.
+arabic-reshaper~=3.0
+python-bidi~=0.6
+
+# EasyOCR — neural OCR used for Arabic pages (RTL-native, much better word spacing
+# than Tesseract). Pulls torchvision (matched to the existing torch). Tesseract
+# remains the fallback when EasyOCR is unavailable.
+easyocr~=1.7

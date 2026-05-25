@@ -77,6 +77,17 @@ LOCAL_TESSDATA = os.path.join(BOOKS_FOLDER, "tessdata")
 # "tessdata_fast" = good accuracy, smaller/faster. Switch to "tessdata_best"
 # for maximum accuracy on accented French at the cost of speed.
 TESSDATA_VARIANT = "tessdata_fast"
+# Per-language override: Arabic recognition is markedly better with the 'best'
+# model, so 'ara' always gets a local best copy (other languages stay fast).
+TESSDATA_VARIANT_BY_LANG = {"ara": "tessdata_best"}
+
+
+def _variant_for(lang):
+    return TESSDATA_VARIANT_BY_LANG.get(lang, TESSDATA_VARIANT)
+
+
+def _local_traineddata(lang):
+    return os.path.join(LOCAL_TESSDATA, f"{lang}.traineddata")
 
 # Render quality. NOTE: the previous version did `min(DPI/72, 2.0)`, which
 # silently capped every page at ~144 DPI. Tesseract wants ~300 DPI, so we now
@@ -165,8 +176,9 @@ def _install_tessdata_dir():
     return None
 
 def _download_traineddata(lang, dest):
-    url = f"https://github.com/tesseract-ocr/{TESSDATA_VARIANT}/raw/main/{lang}.traineddata"
-    print(f"  downloading {lang}.traineddata from {TESSDATA_VARIANT} ...")
+    variant = _variant_for(lang)
+    url = f"https://github.com/tesseract-ocr/{variant}/raw/main/{lang}.traineddata"
+    print(f"  downloading {lang}.traineddata from {variant} ...")
     req = urllib.request.Request(url, headers={"User-Agent": "ocr-books/1.0"})
     tmp = dest + ".part"
     try:
@@ -179,7 +191,7 @@ def _download_traineddata(lang, dest):
         raise RuntimeError(
             f"could not download '{lang}': {e}\n"
             f"  Manually place {lang}.traineddata in {LOCAL_TESSDATA}\n"
-            f"  (get it from https://github.com/tesseract-ocr/{TESSDATA_VARIANT})"
+            f"  (get it from https://github.com/tesseract-ocr/{_variant_for(lang)})"
         )
 
 def ensure_languages(needed):
@@ -196,20 +208,25 @@ def ensure_languages(needed):
     except Exception:
         installed = set()
 
-    if needed <= installed:
+    # Languages pinned to a specific variant (Arabic -> best): never accept a
+    # system/fast copy — require a local best copy, downloading it if missing.
+    force = {l for l in needed if l in TESSDATA_VARIANT_BY_LANG and not os.path.isfile(_local_traineddata(l))}
+    if needed <= installed and not force:
         return "", installed
 
-    print(f"\nMissing language data {sorted(needed - installed)} -> preparing {LOCAL_TESSDATA}")
+    print(f"\nPreparing {LOCAL_TESSDATA} (missing {sorted(needed - installed)}; best: {sorted(force)})")
     os.makedirs(LOCAL_TESSDATA, exist_ok=True)
     install_dir = _install_tessdata_dir()
     available = set()
 
     for lang in sorted(needed):
-        dest = os.path.join(LOCAL_TESSDATA, f"{lang}.traineddata")
+        dest = _local_traineddata(lang)
         if os.path.isfile(dest):
             available.add(lang)
             continue
-        src = os.path.join(install_dir, f"{lang}.traineddata") if install_dir else None
+        # Forced-variant langs skip the install copy and download the right variant.
+        src = None if lang in TESSDATA_VARIANT_BY_LANG else (
+            os.path.join(install_dir, f"{lang}.traineddata") if install_dir else None)
         if src and os.path.isfile(src):
             shutil.copy2(src, dest)
             print(f"  copied {lang}.traineddata from install")
@@ -220,6 +237,12 @@ def ensure_languages(needed):
             available.add(lang)
         except RuntimeError as e:
             print(f"  WARNING: {e}")
+            # Fall back to the installed copy (e.g. fast Arabic) if download failed.
+            fb = os.path.join(install_dir, f"{lang}.traineddata") if install_dir else None
+            if fb and os.path.isfile(fb):
+                shutil.copy2(fb, dest)
+                available.add(lang)
+                print(f"  fell back to installed {lang}.traineddata")
 
     # Env var is more robust than --tessdata-dir: pytesseract splits the config
     # string on whitespace without honouring quotes, which mangles paths.

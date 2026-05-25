@@ -66,6 +66,12 @@ def check_question(raw: str) -> GuardResult:
 
 
 def sanitize_answer(text: str) -> str:
-    """Light output guard: strip leaked role/system markers, trim."""
-    text = re.sub(r"(?im)^\s*(system|assistant|user)\s*:\s*", "", text).strip()
-    return text
+    """Light output guard: strip leaked role/system markers; neutralise leaked
+    LaTeX list environments (KaTeX renders only math, so a stray \\begin{itemize}
+    would hang unrendered) by turning them into Markdown; trim. Math environments
+    like \\begin{aligned}/\\begin{cases} are left untouched."""
+    text = re.sub(r"(?is)<think>.*?</think>\s*", "", text)  # reasoning-model chain-of-thought
+    text = re.sub(r"(?im)^\s*(system|assistant|user)\s*:\s*", "", text)
+    text = re.sub(r"\\(?:begin|end)\s*\{(?:itemize|enumerate)\}", "", text)
+    text = re.sub(r"\\item\s*", "- ", text)
+    return text.strip()

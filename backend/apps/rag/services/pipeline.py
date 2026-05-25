@@ -119,8 +119,12 @@ async def answer_question(question: str, *, language: str | None = None,
                     "message": f"question was very long — using the first {len(question)} characters"})
 
     # --- Semantic cache lookup ------------------------------------------
+    # Skip the cache for problem-solving questions: two different worksheets
+    # ("factor x^2-81" vs "factor x^2-64") embed nearly identically, so a fuzzy
+    # cache hit would serve the WRONG worksheet's answer. (query_vec stays None
+    # here => the store below is also skipped.)
     query_vec = None
-    if settings.RAG_CACHE:
+    if settings.RAG_CACHE and not reformulation.looks_like_problem(question):
         from apps.rag.services.cache import get_cache
         try:
             query_vec = (await asyncio.to_thread(get_retriever().embedder.embed, [question]))[0]

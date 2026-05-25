@@ -16,6 +16,7 @@ avoid the pipeline<->agent import cycle).
 from __future__ import annotations
 
 import asyncio
+import re
 from time import perf_counter
 
 from django.conf import settings
@@ -44,18 +45,34 @@ async def agentic_answer(question: str, *, language, subject, top_k, on_event,
         return len(llm_results) < budget["max"]
 
     async def generate_guarded(messages, *, max_tokens=None, label="generate",
-                               stream_as="token", rebuild_leaner=None, temperature=None):
+                               stream_as="token", rebuild_leaner=None, temperature=None, require=None):
         """Generate text, streaming each token as ``stream_as`` when on_event is
         set. Robust: (a) if the model streams zero tokens, retry once with a leaner
-        prompt; (b) if it stops at the token limit (finish_reason=length), continue
-        the answer instead of leaving it truncated. Budget-gated; appends every
-        LLMResult to llm_results. Returns (sanitized_text, last_result)."""
+        prompt; (b) if it stops UNFINISHED — at the token limit (finish_reason=
+        length) OR, when ``require`` (a regex) is given, without that marker present
+        (e.g. a solve part with no "Result:" line) — continue the answer instead of
+        leaving it truncated. This also covers backends that omit finish_reason on a
+        stream. Budget-gated; appends every LLMResult. Returns (text, last_result)."""
         async def run(msgs):
             if on_event is not None:
                 return await llm.chat_stream(
                     msgs, lambda d: emit({"type": stream_as, "text": d}),
+                    on_reasoning=lambda d: emit({"type": "reason_token", "text": d}),
                     max_tokens=max_tokens, temperature=temperature)
             return await llm.chat(msgs, max_tokens=max_tokens, temperature=temperature)
+
+        def unfinished() -> bool:
+            # A reasoning-only response (content empty -> reasoning fallback) must NOT
+            # be "continued" — that just produces more chain-of-thought, not an answer.
+            if getattr(result, "via_reasoning", False):
+                return False
+            # Thinking-model mode (a completion-token floor is set): the big budget is
+            # what guarantees completeness; do NOT continue, since a fresh turn on a
+            # reasoning model just emits more hidden thinking, not a clean continuation.
+            if getattr(settings, "LLM_MIN_COMPLETION_TOKENS", 0) > 0:
+                return False
+            return (result.finish_reason == "length"
+                    or (require is not None and not re.search(require, text, re.IGNORECASE)))
 
         result = await run(messages)
         llm_results.append(result)
@@ -66,18 +83,18 @@ async def agentic_answer(question: str, *, language, subject, top_k, on_event,
             result = await run(rebuild_leaner() if rebuild_leaner else messages)
             llm_results.append(result)
             text = sanitize_answer(result.text)
-        # Continue a cut-off answer (stopped at the token limit) rather than leaving
-        # it truncated mid-step. Bounded by RAG_MAX_CONTINUATIONS and the call budget.
+        # Continue an unfinished answer (cut off at the token limit, or — for a solve
+        # part — stopped without a Result line) rather than leaving it mid-step.
+        # Bounded by RAG_MAX_CONTINUATIONS and the call budget.
         conts = 0
-        while (result.finish_reason == "length" and text
-               and conts < settings.RAG_MAX_CONTINUATIONS and can_call()):
+        while text and unfinished() and conts < settings.RAG_MAX_CONTINUATIONS and can_call():
             conts += 1
             await emit({"type": "log", "stage": label, "level": "warn",
-                        "message": "hit the length limit — continuing the answer"})
+                        "message": "answer looks unfinished — continuing"})
             cont_msgs = list(messages) + [
                 {"role": "assistant", "content": text},
-                {"role": "user", "content": "Continue exactly where you stopped. Do NOT repeat "
-                                            "anything already written; just finish the answer."},
+                {"role": "user", "content": "Continue exactly where you stopped. Do NOT repeat anything "
+                                            "already written; finish the solution and end with the Result line."},
             ]
             result = await run(cont_msgs)
             llm_results.append(result)
@@ -260,7 +277,7 @@ async def agentic_answer(question: str, *, language, subject, top_k, on_event,
             text, last_result = await generate_guarded(
                 msgs, max_tokens=settings.RAG_SOLVE_MAX_TOKENS, label="solve",
                 stream_as="token", rebuild_leaner=leaner,
-                temperature=settings.RAG_SOLVE_TEMPERATURE)
+                temperature=settings.RAG_SOLVE_TEMPERATURE, require=r"r[ée]sult")
             solved.append(f"{header}{text}")
         answer_text = "\n\n".join(b for b in solved if b.strip())
 

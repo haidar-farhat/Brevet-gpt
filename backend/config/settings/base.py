@@ -144,6 +144,15 @@ LMSTUDIO_MODEL = env("LMSTUDIO_MODEL", default="")  # blank => auto-detect loade
 LLM_TEMPERATURE = env.float("LLM_TEMPERATURE", default=0.2)
 LLM_MAX_TOKENS = env.int("LLM_MAX_TOKENS", default=1536)  # room for fuller, tutor-style answers
 LLM_TIMEOUT = env.int("LLM_TIMEOUT", default=120)
+# Reasoning models (e.g. Qwen3) otherwise spend the whole token budget on hidden
+# chain-of-thought and emit EMPTY content. /no_think disables it (ignored by
+# non-reasoning models); our structured Problem/Method/Step/Result IS the working.
+LLM_NO_THINK = env.bool("LLM_NO_THINK", default=True)
+# Floor on completion tokens: a reasoning model (Qwen3) needs headroom to "think"
+# AND still emit the visible answer — without it a small per-call cap is consumed
+# entirely by hidden reasoning and the answer comes out empty. It is a CAP, not a
+# target (the model still stops when done), so short calls aren't slowed. 0 = off.
+LLM_MIN_COMPLETION_TOKENS = env.int("LLM_MIN_COMPLETION_TOKENS", default=0)
 
 # --- Retrieval -----------------------------------------------------------
 RAG_CANDIDATES = env.int("RAG_CANDIDATES", default=20)            # per retriever

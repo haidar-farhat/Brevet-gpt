@@ -107,9 +107,11 @@ return exactly one entry.
 it — the polynomial P(x)=…, given values, the numbers from a figure, definitions — so it can be solved \
 without seeing the other parts.
 - The input may be pasted STACKED/multi-line: a digit on the line just under a variable is an EXPONENT \
-("x" then "2" → x^2), and a fraction is stacked with the TOP line the numerator and the BOTTOM line the \
-denominator → rewrite it inline as (top)/(bottom). Convert each part to clean INLINE math, keeping the \
-student's EXACT numbers.
+("x" then "2" → x^2). A fraction is stacked over two lines, but in pasted text the line ORDER is \
+UNRELIABLE — so for an equation "(fraction) = 0" write it inline with the FACTORABLE / higher-degree \
+polynomial as the NUMERATOR and the simpler/linear factor as the DENOMINATOR (the standard rational- \
+equation form), e.g. the lines "x-14" and "x^2-196" → "(x^2-196)/(x-14)=0". Convert each part to clean \
+INLINE math, keeping the student's EXACT numbers.
 - Keep the original wording and numbers. Do NOT solve anything here. Use the same language as the problem.\
 """
 
@@ -177,10 +179,12 @@ words and solve as far as you can.
 
 Be careful with the maths:
 - Square roots: x^2 = 49 gives x = ±7 (the root of 49), NOT ±49.
-- A fraction is numerator-over-denominator; if it is stacked over two lines, the TOP line is the \
-numerator and the BOTTOM line is the denominator. For a rational equation, FIRST state \
-"Numerator = …, Denominator = …", then set the NUMERATOR = 0 and EXCLUDE any value that makes the \
-DENOMINATOR = 0 (state the excluded value; if the only root is excluded, there is no solution).
+- For a rational equation "(fraction) = 0": plain-text line order is UNRELIABLE, so pick by ROLE, not \
+position — the NUMERATOR is the polynomial whose roots are the candidate solutions (usually the \
+factorable / higher-degree one, e.g. x^2-196), and the DENOMINATOR is the factor that must stay non-zero \
+(usually linear, e.g. x-14). FIRST state "Numerator = …, Denominator = …", then set the NUMERATOR = 0, \
+and EXCLUDE any value making the DENOMINATOR = 0 (e.g. (x^2-196)/(x-14)=0 → numerator roots x=±14, \
+exclude x=14 → answer x=-14). If the only numerator root is excluded, there is no solution.
 
 FORMATTING:
 - Use $...$ or $$...$$ ONLY for real maths; never wrap ordinary words in \\text{}.

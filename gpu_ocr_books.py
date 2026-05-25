@@ -435,9 +435,42 @@ def build_paragraphs(lines, page_h):
         })
     return paras
 
+# Optional EasyOCR — a stronger neural OCR for Arabic (RTL-native; far better word
+# spacing & diacritics than Tesseract). Recognition/detection models download on
+# first use; we fall back to Tesseract if EasyOCR is unavailable or errors.
+try:
+    import easyocr as _easyocr
+    _EASYOCR_OK = True
+except Exception:  # pragma: no cover - optional dep
+    _EASYOCR_OK = False
+
+_EASYOCR_LANGS = {"ara": ["ar"]}  # tesseract lang -> easyocr lang codes
+_easyocr_readers = {}
+
+
+def _easyocr_reader(lang):
+    if lang not in _easyocr_readers:  # Reader load is heavy — cache per language
+        _easyocr_readers[lang] = _easyocr.Reader(_EASYOCR_LANGS[lang], gpu=False, verbose=False)
+    return _easyocr_readers[lang]
+
+
+def easyocr_text(img, lang):
+    """Page text via EasyOCR, paragraph-grouped in reading order (RTL-aware)."""
+    lines = _easyocr_reader(lang).readtext(img, detail=0, paragraph=True)
+    return "\n\n".join(s for s in lines if s and s.strip())
+
+
 def ocr_page_text(img, lang, tessdata_arg):
-    """Tesseract's canonical text for a page — respects RTL reading order. Used for
-    Arabic, where reconstructing paragraphs from LTR word boxes is unreliable."""
+    """Canonical page text in correct reading order. For Arabic prefer EasyOCR (a much
+    stronger neural OCR for RTL); fall back to Tesseract image_to_string otherwise or
+    if EasyOCR is unavailable/fails."""
+    if _EASYOCR_OK and lang in _EASYOCR_LANGS:
+        try:
+            text = easyocr_text(img, lang)
+            if text.strip():
+                return text
+        except Exception as e:  # pragma: no cover
+            print(f"  WARNING: EasyOCR failed ({e}); falling back to Tesseract")
     cfg = f"{TESSERACT_CONFIG} {tessdata_arg}".strip()
     return pytesseract.image_to_string(img, lang=lang, config=cfg)
 

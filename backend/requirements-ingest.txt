@@ -34,3 +34,8 @@ tqdm~=4.66
 # affect only how the clean PDF looks — never what the RAG pipeline reads.
 arabic-reshaper~=3.0
 python-bidi~=0.6
+
+# EasyOCR — neural OCR used for Arabic pages (RTL-native, much better word spacing
+# than Tesseract). Pulls torchvision (matched to the existing torch). Tesseract
+# remains the fallback when EasyOCR is unavailable.
+easyocr~=1.7

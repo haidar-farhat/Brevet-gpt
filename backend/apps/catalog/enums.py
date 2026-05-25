@@ -4,11 +4,14 @@ from __future__ import annotations
 from django.db import models
 
 
-class Language(models.TextChoices):
-    """Medium of instruction. Doubles as a routing dimension."""
+class LanguageCode(models.TextChoices):
+    """Built-in language codes used as seed defaults / code constants. The full,
+    extensible list of supported languages lives in the ``Language`` model so more
+    can be added at runtime."""
 
     ENGLISH = "en", "English"
     FRENCH = "fr", "French"
+    ARABIC = "ar", "Arabic"
 
 
 class BookStatus(models.TextChoices):

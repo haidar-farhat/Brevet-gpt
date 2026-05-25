@@ -20,12 +20,12 @@ from django.utils import timezone
 from apps.catalog.enums import BookStatus
 from apps.catalog.models import Book, Subject
 from apps.catalog.services import intake
+from apps.catalog.services import ocr as ocr_svc
 from apps.catalog.services.ingest import document_hash, ingest_book
 
 _ALLOWED_EXT = {".pdf", ".docx"}
 _PDF_MAGIC = b"%PDF"
 _ZIP_MAGIC = b"PK\x03\x04"  # .docx is a zip container
-_LANG_FOLDER = {"en": "english", "fr": "french"}
 
 _INGEST_LOCK = threading.Lock()
 
@@ -80,9 +80,15 @@ def validate_upload(filename: str, size: int, head: bytes) -> str:
     return ext
 
 
+def _lang_folder(language: str) -> str:
+    """Uploads/corpus subfolder for a language code, from the Language registry."""
+    _tess, _subdir, folder = ocr_svc.lang_map().get(language, ("", language, language))
+    return folder or language or "other"
+
+
 def save_upload(language: str, filename: str, chunks) -> Path:
     """Stream the uploaded file to UPLOADS_DIR/{lang}/ and return its path."""
-    folder = Path(settings.UPLOADS_DIR) / _LANG_FOLDER.get(language, "other")
+    folder = Path(settings.UPLOADS_DIR) / _lang_folder(language)
     folder.mkdir(parents=True, exist_ok=True)
     dest = folder / sanitize_filename(filename)
     with open(dest, "wb") as fh:
@@ -256,7 +262,7 @@ def run_upload(*, src_path, language: str, subject_code: str, title: str, level:
 
 def _resolve_target_book(*, resolution, target_id, language, filename, title, subject, level,
                          meta, content_hash) -> Book:
-    source_file = f"{_LANG_FOLDER.get(language, 'other')}/{sanitize_filename(filename)}"
+    source_file = f"{_lang_folder(language)}/{sanitize_filename(filename)}"
     defaults = {
         "title": title, "subject": subject, "level": level,
         "pdf_path": meta.pdf_path, "total_pages": meta.total_pages,

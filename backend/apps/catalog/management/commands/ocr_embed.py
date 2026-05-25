@@ -17,15 +17,14 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.utils import timezone
 
-from apps.catalog.enums import Language, SubjectCode
+from apps.catalog.data import taxonomy
+from apps.catalog.enums import LanguageCode, SubjectCode
 from apps.catalog.metadata import clean_title
-from apps.catalog.models import Book, Subject
+from apps.catalog.models import Book, Grade, School, Subject
 from apps.catalog.services import ocr as ocr_svc
 from apps.catalog.services.embeddings import build_embedder
 from apps.catalog.services.ingest import build_records, ingest_book
 from apps.catalog.services.vectorstore import get_collection
-
-_LANG_MAP = ocr_svc.LANG_MAP  # (tess lang, results subdir, assets folder) per language code
 
 
 class Command(BaseCommand):
@@ -33,7 +32,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("--input", type=Path, default=None, help="Path to the scanned PDF.")
-        parser.add_argument("--language", choices=tuple(_LANG_MAP), default=None)
+        parser.add_argument("--language", choices=tuple(LanguageCode.values), default=None)
         parser.add_argument("--subject", choices=tuple(SubjectCode.values), default=None)
         parser.add_argument("--title", default=None)
         parser.add_argument("--level", default="brevet")
@@ -44,11 +43,12 @@ class Command(BaseCommand):
 
     def handle(self, *args: object, **options: object) -> None:
         interactive = not options["non_interactive"]
+        lang_map = ocr_svc.lang_map()
 
         # --- 1. Gather routing variables -------------------------------------
         input_path = self._resolve_input(options["input"], interactive)
         language = options["language"] or self._choose(
-            "Language", {code: label for code, label in Language.choices if code in _LANG_MAP}, interactive
+            "Language", {code: label for code, label in LanguageCode.choices if code in lang_map}, interactive
         )
         subject_code = options["subject"] or self._choose(
             "Subject", dict(SubjectCode.choices), interactive
@@ -59,6 +59,8 @@ class Command(BaseCommand):
         dry_run = options["dry_run"]
 
         subject = Subject.objects.get(code=subject_code)
+        default_school = School.objects.filter(code=taxonomy.DEFAULT_SCHOOL[1]).first()
+        default_grade = Grade.objects.filter(code=taxonomy.DEFAULT_GRADE_CODE).first()
 
         # Build the embedder up front so a misconfig fails *before* costly OCR.
         embedder = collection = None
@@ -88,10 +90,12 @@ class Command(BaseCommand):
         total_pages = ocr_svc.page_count(clean_pdf)
         book, _ = Book.objects.update_or_create(
             language=language,
-            source_file=f"{_LANG_MAP[language][2]}/{input_path.name}",
+            source_file=f"{lang_map[language][2]}/{input_path.name}",
             defaults={
                 "title": title,
                 "subject": subject,
+                "school": default_school,
+                "grade": default_grade,
                 "level": level,
                 "pdf_path": str(clean_pdf),
                 "total_pages": total_pages,

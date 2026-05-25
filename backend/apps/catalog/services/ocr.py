@@ -14,11 +14,33 @@ from pathlib import Path
 import fitz  # PyMuPDF
 from django.conf import settings
 
-# language code -> (tesseract lang, gpu_ocr_books results subdir, assets folder)
-LANG_MAP: dict[str, tuple[str, str, str]] = {
+# Built-in fallback, used only if the Language registry is empty/unavailable.
+# code -> (tesseract lang, gpu_ocr_books results subdir, assets folder)
+_FALLBACK_LANG_MAP: dict[str, tuple[str, str, str]] = {
     "en": ("eng", "eng", "english"),
     "fr": ("fra", "fr", "french"),
+    "ar": ("ara", "ar", "arabic"),
 }
+
+
+def lang_map() -> dict[str, tuple[str, str, str]]:
+    """code -> (tesseract, ocr_subdir, assets_folder), sourced from the Language
+    registry so newly-added languages work; falls back to the built-ins when the
+    table is empty or the DB is unavailable."""
+    try:
+        from apps.catalog.models import Language
+
+        rows = {
+            lng.code: (
+                lng.tesseract or _FALLBACK_LANG_MAP.get(lng.code, ("", "", ""))[0],
+                lng.ocr_subdir or lng.code,
+                lng.assets_folder or lng.code,
+            )
+            for lng in Language.objects.filter(enabled=True)
+        }
+        return rows or dict(_FALLBACK_LANG_MAP)
+    except Exception:
+        return dict(_FALLBACK_LANG_MAP)
 
 
 class OCRError(RuntimeError):
@@ -40,7 +62,7 @@ def load_ocr_module():
 def clean_pdf_path(input_path: Path, language: str):
     """Deterministic output path for a scanned PDF's clean version."""
     ocr = load_ocr_module()
-    _tess, out_subdir, _iso = LANG_MAP[language]
+    _tess, out_subdir, _iso = lang_map().get(language, _FALLBACK_LANG_MAP.get(language, ("", language, language)))
     return Path(ocr.RESULTS_FOLDER) / out_subdir / f"{Path(input_path).stem}.pdf"
 
 
@@ -48,10 +70,11 @@ def ocr_to_clean_pdf(input_path: Path, language: str) -> Path:
     """OCR a scanned PDF into a clean, TOC'd PDF and return its path. If the
     expected output already exists (e.g. a dedup re-submit of the same file), reuse
     it instead of re-running the expensive OCR."""
-    if language not in LANG_MAP:
+    m = lang_map()
+    if language not in m:
         raise OCRError(f"Unsupported OCR language: {language}")
     ocr = load_ocr_module()
-    tess_lang, out_subdir, iso = LANG_MAP[language]
+    tess_lang, out_subdir, iso = m[language]
     out = Path(ocr.RESULTS_FOLDER) / out_subdir / f"{Path(input_path).stem}.pdf"
     if out.is_file():
         return out  # already OCR'd — skip the work

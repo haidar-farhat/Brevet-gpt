@@ -13,7 +13,7 @@ from __future__ import annotations
 from django.core.validators import MinValueValidator
 from django.db import models
 
-from apps.catalog.enums import BookStatus, Language, SubjectCode
+from apps.catalog.enums import BookStatus, SubjectCode
 
 
 class TimeStampedModel(models.Model):
@@ -48,12 +48,65 @@ class Subject(TimeStampedModel):
         return self.get_code_display()
 
 
+class Language(TimeStampedModel):
+    """Registry of supported languages — extensible at runtime (new languages can
+    be added here). ``Book.language``/``Chunk.language`` store the ``code``."""
+
+    code = models.CharField(max_length=8, unique=True, help_text="Short code, e.g. 'en', 'fr', 'ar'.")
+    name = models.CharField(max_length=64)
+    native_name = models.CharField(max_length=64, blank=True)
+    tesseract = models.CharField(max_length=16, blank=True, help_text="Tesseract OCR language, e.g. 'eng'.")
+    ocr_subdir = models.CharField(max_length=32, blank=True, help_text="gpu_ocr_books results subfolder.")
+    assets_folder = models.CharField(max_length=64, blank=True, help_text="Corpus/uploads subfolder, e.g. 'english'.")
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "languages"
+        ordering = ("code",)
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.code})"
+
+
+class School(TimeStampedModel):
+    """A school / institution — the umbrella classifying the corpus."""
+
+    name = models.CharField(max_length=128, unique=True)
+    code = models.SlugField(max_length=64, unique=True)
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "schools"
+        ordering = ("name",)
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class Grade(TimeStampedModel):
+    """A school year / class level (e.g. 'Grade 9')."""
+
+    name = models.CharField(max_length=64, unique=True)
+    code = models.SlugField(max_length=32, unique=True)
+    ordinal = models.PositiveSmallIntegerField(default=0, help_text="Sort order, e.g. 9 for Grade 9.")
+    enabled = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "grades"
+        ordering = ("ordinal", "name")
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class Book(TimeStampedModel):
     """One scanned textbook (one source PDF)."""
 
     title = models.CharField(max_length=255)
-    language = models.CharField(max_length=2, choices=Language.choices)
+    language = models.CharField(max_length=8, help_text="Language code from the Language registry (e.g. 'en').")
     subject = models.ForeignKey(Subject, on_delete=models.PROTECT, related_name="books")
+    school = models.ForeignKey(School, on_delete=models.SET_NULL, null=True, blank=True, related_name="books")
+    grade = models.ForeignKey(Grade, on_delete=models.SET_NULL, null=True, blank=True, related_name="books")
     level = models.CharField(max_length=32, default="brevet")
 
     source_file = models.CharField(
@@ -159,7 +212,7 @@ class Chunk(TimeStampedModel):
         blank=True,
         related_name="chunks",
     )
-    language = models.CharField(max_length=2, choices=Language.choices)
+    language = models.CharField(max_length=8)
     subject = models.ForeignKey(Subject, on_delete=models.PROTECT, related_name="chunks")
 
     chunk_index = models.PositiveIntegerField(help_text="Order within the book.")

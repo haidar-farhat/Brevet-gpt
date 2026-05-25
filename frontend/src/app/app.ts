@@ -4,6 +4,7 @@ import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 
 import { BrevetEvent, BrevetService } from './brevet.service';
 import { renderRich } from './format';
+import { ManageComponent } from './manage.component';
 
 interface LogLine {
   stage: string;
@@ -37,13 +38,17 @@ const EXAMPLES = [
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule],
+  imports: [FormsModule, ManageComponent],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
 export class App {
   readonly subjects = SUBJECTS;
   readonly examples = EXAMPLES;
+
+  // Which screen is showing: the study assistant or the materials manager.
+  readonly view = signal<'study' | 'manage'>('study');
+  private abort: AbortController | null = null;
 
   // Inputs
   readonly question = signal('');
@@ -207,6 +212,7 @@ export class App {
 
     const lang = this.language() === 'auto' ? null : this.language();
     const subject = this.subject().trim() || null;
+    this.abort = new AbortController();
 
     await this.api.ask(q, lang, subject, {
       onEvent: (ev) => this.handleEvent(ev),
@@ -214,8 +220,19 @@ export class App {
       onDone: () => {
         this.busy.set(false);
         this.stage.set('done');
+        this.abort = null;
       },
-    });
+    }, this.abort.signal);
+  }
+
+  /** Abort an in-flight query (the SSE fetch is cancelled via AbortSignal). */
+  stop(): void {
+    if (!this.busy()) return;
+    this.abort?.abort();
+    this.abort = null;
+    this.busy.set(false);
+    this.stage.set('done');
+    this.pushLog('answer', 'warn', 'stopped by user');
   }
 
   private handleEvent(ev: BrevetEvent): void {

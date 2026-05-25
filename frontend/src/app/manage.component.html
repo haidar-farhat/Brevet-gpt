@@ -1,0 +1,141 @@
+<div class="manage">
+  <!-- Add material -->
+  <section class="seg">
+    <div class="seg-head">
+      <span class="seg-title">Add material</span>
+      <span class="spacer"></span>
+      @if (ingestBusy()) { <span class="muted">an ingest is running…</span> }
+    </div>
+
+    <label class="file">
+      <input type="file" accept=".pdf,.docx" (change)="onFile($event)" [disabled]="uploading()" />
+      <span>{{ fileName() || 'Choose a PDF or Word (.docx) file…' }}</span>
+    </label>
+
+    <input class="ip" placeholder="Title" [ngModel]="upTitle()" (ngModelChange)="upTitle.set($event)" [disabled]="uploading()" />
+
+    <div class="row">
+      <div class="seg-ctrl" role="group" aria-label="language">
+        <button [class.on]="upLang()==='en'" (click)="upLang.set('en')" [disabled]="uploading()">EN</button>
+        <button [class.on]="upLang()==='fr'" (click)="upLang.set('fr')" [disabled]="uploading()">FR</button>
+      </div>
+      <select class="subject" [ngModel]="upSubject()" (ngModelChange)="upSubject.set($event)" [disabled]="uploading()">
+        <option value="">Subject…</option>
+        @for (s of subjects; track s) { <option [value]="s">{{ s }}</option> }
+      </select>
+      <input class="ip lvl" placeholder="Level" [ngModel]="upLevel()" (ngModelChange)="upLevel.set($event)" [disabled]="uploading()" />
+      <button class="btn" (click)="startUpload()" [disabled]="!canUpload()">{{ uploading() ? 'Working…' : 'Upload ▷' }}</button>
+    </div>
+
+    @if (uploading() || upLogs().length) {
+      <div class="progress">
+        @if (uploading()) { <div class="live"><span class="dot"></span>{{ upStageLabel() }}…</div> }
+        <div class="steps">
+          @for (l of upLogs(); track $index) {
+            <div class="step {{ l.level }}"><span class="tag">{{ l.stage }}</span><span class="msg">{{ l.text }}</span></div>
+          }
+        </div>
+      </div>
+    }
+  </section>
+
+  <!-- Duplicate-resolution modal -->
+  @if (pending(); as m) {
+    <div class="modal-backdrop" (click)="cancelResolve()">
+      <div class="modal" (click)="$event.stopPropagation()">
+        <div class="seg-title">Already in the library</div>
+        <p>
+          A <strong>{{ m.match_reason }}</strong> match exists:
+          <strong>{{ m.title }}</strong> ({{ m.subject }} · {{ m.language }} · {{ m.chunks }} chunks · {{ m.status }}).
+          What would you like to do?
+        </p>
+        <div class="modal-actions">
+          <button class="btn" (click)="resolve('update')">Update it in place</button>
+          <button class="btn alt" (click)="resolve('freeze_replace')">Freeze old &amp; add new</button>
+          <button class="btn ghost" (click)="cancelResolve()">Cancel</button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- Library -->
+  <section class="seg">
+    <div class="seg-head">
+      <span class="seg-title">Library</span>
+      <span class="spacer"></span>
+      <select class="subject" [ngModel]="fStatus()" (ngModelChange)="fStatus.set($event); refresh()">
+        <option value="">all</option><option value="active">active</option><option value="frozen">frozen</option>
+      </select>
+      <select class="subject" [ngModel]="fSubject()" (ngModelChange)="fSubject.set($event); refresh()">
+        <option value="">any subject</option>
+        @for (s of subjects; track s) { <option [value]="s">{{ s }}</option> }
+      </select>
+      <input class="ip" placeholder="filter title…" [ngModel]="fQuery()" (ngModelChange)="fQuery.set($event)" (keyup.enter)="refresh()" />
+      <button class="mini" (click)="refresh()" title="refresh">↻</button>
+    </div>
+
+    @if (loading()) { <div class="muted">loading…</div> }
+    @else if (!books().length) { <div class="muted">no materials yet — upload one above.</div> }
+    @else {
+      <table class="lib">
+        <thead><tr><th>Title</th><th>Subj</th><th>Lang</th><th>Pages</th><th>Chunks</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          @for (b of books(); track b.id) {
+            <tr [class.frozen]="b.status==='frozen'">
+              <td>
+                <button class="link" (click)="openDetail(b.id)">{{ b.title }}</button>
+                @if (b.replaces) { <span class="badge muted">replaces #{{ b.replaces }}</span> }
+              </td>
+              <td>{{ b.subject }}</td>
+              <td>{{ b.language }}</td>
+              <td>{{ b.total_pages ?? '—' }}</td>
+              <td>{{ b.chunks }}</td>
+              <td><span class="badge {{ b.status==='active' ? 'good' : 'ok' }}">{{ b.status }}</span></td>
+              <td class="actions">
+                <button class="mini" (click)="freeze(b)">{{ b.status==='frozen' ? 'unfreeze' : 'freeze' }}</button>
+                <button class="mini danger" (click)="del(b)">delete</button>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    }
+  </section>
+
+  <!-- Browse one book's chunks -->
+  @if (openBook(); as d) {
+    <section class="seg">
+      <div class="seg-head">
+        <span class="seg-title">{{ d.title }}</span>
+        <span class="muted">&nbsp;{{ d.subject }} · {{ d.language }} · {{ d.chunk_count }} chunks · {{ d.status }}</span>
+        <span class="spacer"></span>
+        <button class="mini" (click)="closeDetail()">close</button>
+      </div>
+      @for (c of d.chunks; track c.chunk_index) {
+        <div class="chunk">
+          <div class="meta">#{{ c.chunk_index }} · p.{{ c.page_start }}@if (c.page_end !== c.page_start) {-{{ c.page_end }}}@if (c.heading_path) { — {{ c.heading_path }}}</div>
+          <pre>{{ c.content }}</pre>
+        </div>
+      }
+      @if (d.chunk_count > d.chunks.length) { <div class="muted">showing the first {{ d.chunks.length }} of {{ d.chunk_count }} chunks.</div> }
+    </section>
+  }
+
+  <!-- Corpus search -->
+  <section class="seg">
+    <div class="seg-head"><span class="seg-title">Search the corpus</span></div>
+    <div class="row">
+      <input class="ip grow" placeholder="search active materials…" [ngModel]="searchQ()" (ngModelChange)="searchQ.set($event)" (keyup.enter)="runSearch()" />
+      <button class="btn" (click)="runSearch()" [disabled]="searching()">{{ searching() ? '…' : 'Search' }}</button>
+    </div>
+    @if (searchHits(); as hits) {
+      @if (!hits.length) { <div class="muted">no matches.</div> }
+      @for (h of hits; track $index) {
+        <div class="hit">
+          <div class="meta">{{ h.book }} · {{ h.subject }} · p.{{ h.page_start }}@if (h.heading) { — {{ h.heading }}} <span class="sim">sim {{ h.sim }}</span></div>
+          <div class="snip">{{ h.snippet }}</div>
+        </div>
+      }
+    }
+  </section>
+</div>
